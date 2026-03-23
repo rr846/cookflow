@@ -2,15 +2,17 @@
 Easy Cook – FastAPI Backend (Neuaufbau)
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from typing import List, Dict, Any
 
 import sqlite3
 import json
 import os
+import uuid
 from pathlib import Path
 from datetime import date, timedelta
 from dotenv import load_dotenv
@@ -95,13 +97,16 @@ def init_db():
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS settings (
-            key   TEXT PRIMARY KEY,
-            value TEXT
+            user_id TEXT DEFAULT 'default',
+            key     TEXT NOT NULL,
+            value   TEXT,
+            PRIMARY KEY (user_id, key)
         )
     """)
     c.execute("""
         CREATE TABLE IF NOT EXISTS weekly_plans (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    TEXT    DEFAULT 'default',
             week_start TEXT    NOT NULL,
             persons    INTEGER DEFAULT 2,
             status     TEXT    DEFAULT 'pending',
@@ -161,20 +166,12 @@ def init_db():
         except Exception:
             pass
 
-
-    defaults = {
-        "persons":               "2",
-        "preferred_cuisines":    "[]",
-        "preferred_ingredients": "[]",
-        "speed_refinement":      "3",
-        "health_comfort":        "3",
-        "diet_type":             "alles",
-        "allergies":             "[]",
-        "onboarding_complete":   "false",
-        "nutrition_focus":       "[]",
-    }
-    for key, value in defaults.items():
-        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
+    # Migration: user_id zu weekly_plans hinzufügen
+    try:
+        c.execute("ALTER TABLE weekly_plans ADD COLUMN user_id TEXT DEFAULT 'default'")
+        conn.commit()
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()
@@ -207,9 +204,9 @@ def row_to_recipe(r) -> Dict[str, Any]:
     }
 
 
-def get_setting(key: str, default: str = "") -> str:
+def get_setting(key: str, default: str = "", user_id: str = "default") -> str:
     conn = get_db()
-    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    row = conn.execute("SELECT value FROM settings WHERE user_id=? AND key=?", (user_id, key)).fetchone()
     conn.close()
     return row["value"] if row else default
 
@@ -406,23 +403,72 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
+
+
+# ─────────────────────────────────────────────
+# Cookie-basierte User-ID
+# ─────────────────────────────────────────────
+
+COOKIE_NAME = "cookflow_uid"
+COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 Jahr
+
+
+class UserCookieMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        uid = request.cookies.get(COOKIE_NAME)
+        new_cookie = False
+        if not uid:
+            uid = str(uuid.uuid4())[:12]
+            new_cookie = True
+        request.state.user_id = uid
+        response = await call_next(request)
+        if new_cookie:
+            response.set_cookie(
+                COOKIE_NAME, uid,
+                max_age=COOKIE_MAX_AGE,
+                httponly=False,
+                samesite="lax",
+            )
+        return response
+
+
+app.add_middleware(UserCookieMiddleware)
+
+
+def get_uid(request: Request) -> str:
+    return getattr(request.state, "user_id", "default")
+
 
 # ─────────────────────────────────────────────
 # Settings
 # ─────────────────────────────────────────────
 
 @app.get("/api/settings")
-def api_get_settings():
+def api_get_settings(request: Request):
+    uid = get_uid(request)
     conn = get_db()
-    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    rows = conn.execute("SELECT key, value FROM settings WHERE user_id=?", (uid,)).fetchall()
+    if not rows:
+        # Neue User: Defaults einfügen
+        defaults = {
+            "persons": "2", "preferred_cuisines": "[]", "preferred_ingredients": "[]",
+            "speed_refinement": "3", "health_comfort": "3", "diet_type": "alles",
+            "allergies": "[]", "onboarding_complete": "false", "nutrition_focus": "[]",
+        }
+        for k, v in defaults.items():
+            conn.execute("INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (?, ?, ?)", (uid, k, v))
+        conn.commit()
+        rows = conn.execute("SELECT key, value FROM settings WHERE user_id=?", (uid,)).fetchall()
     conn.close()
     data = {r["key"]: r["value"] for r in rows}
     return data
 
 
 @app.put("/api/settings")
-def api_update_settings(payload: Dict[str, Any]):
+def api_update_settings(request: Request, payload: Dict[str, Any]):
+    uid = get_uid(request)
     allowed = {
         "persons", "preferred_cuisines", "preferred_ingredients",
         "speed_refinement", "health_comfort",
@@ -435,8 +481,8 @@ def api_update_settings(payload: Dict[str, Any]):
             if isinstance(val, (list, dict)):
                 val = json.dumps(val, ensure_ascii=False)
             c.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                (key, str(val))
+                "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES (?, ?, ?)",
+                (uid, key, str(val))
             )
     conn.commit()
     conn.close()
@@ -448,11 +494,12 @@ def api_update_settings(payload: Dict[str, Any]):
 # ─────────────────────────────────────────────
 
 @app.get("/api/plan")
-def api_get_plan():
+def api_get_plan(request: Request):
+    uid = get_uid(request)
     week_start = current_week_start()
     conn = get_db()
     plan = conn.execute(
-        "SELECT * FROM weekly_plans WHERE week_start=?", (week_start,)
+        "SELECT * FROM weekly_plans WHERE week_start=? AND user_id=?", (week_start, uid)
     ).fetchone()
 
     if not plan:
@@ -474,30 +521,30 @@ def api_get_plan():
         "recipes": [row_to_recipe(r) for r in recipes],
     }
 
-    # Fehlende Bilder im Hintergrund nachladen
-    _diet = get_setting("diet_type", "alles")
+    _diet = get_setting("diet_type", "alles", uid)
     image_service.trigger_image_generation([dict(r) for r in recipes], diet_type=_diet)
 
     return result
 
 
 @app.post("/api/plan/generate")
-def api_generate_plan():
+def api_generate_plan(request: Request):
+    uid = get_uid(request)
     week_start = current_week_start()
     conn = get_db()
     c = conn.cursor()
 
-    persons           = int(get_setting("persons", "2"))
-    preferred_cuisines = json.loads(get_setting("preferred_cuisines",    "[]"))
-    preferred_ings     = json.loads(get_setting("preferred_ingredients", "[]"))
-    speed_refinement   = int(get_setting("speed_refinement", "3"))
-    health_comfort     = int(get_setting("health_comfort",   "3"))
-    diet_type          = get_setting("diet_type", "alles")
-    allergies          = json.loads(get_setting("allergies", "[]"))
-    nutrition_focus     = json.loads(get_setting("nutrition_focus", "[]"))
+    persons           = int(get_setting("persons", "2", uid))
+    preferred_cuisines = json.loads(get_setting("preferred_cuisines",    "[]", uid))
+    preferred_ings     = json.loads(get_setting("preferred_ingredients", "[]", uid))
+    speed_refinement   = int(get_setting("speed_refinement", "3", uid))
+    health_comfort     = int(get_setting("health_comfort",   "3", uid))
+    diet_type          = get_setting("diet_type", "alles", uid)
+    allergies          = json.loads(get_setting("allergies", "[]", uid))
+    nutrition_focus     = json.loads(get_setting("nutrition_focus", "[]", uid))
 
     existing = c.execute(
-        "SELECT * FROM weekly_plans WHERE week_start=?", (week_start,)
+        "SELECT * FROM weekly_plans WHERE week_start=? AND user_id=?", (week_start, uid)
     ).fetchone()
 
     if existing:
@@ -543,8 +590,8 @@ def api_generate_plan():
         ).fetchall()]
     else:
         c.execute(
-            "INSERT INTO weekly_plans (week_start, persons) VALUES (?, ?)",
-            (week_start, persons)
+            "INSERT INTO weekly_plans (user_id, week_start, persons) VALUES (?, ?, ?)",
+            (uid, week_start, persons)
         )
         plan_id = c.lastrowid
         conn.commit()
@@ -555,7 +602,7 @@ def api_generate_plan():
 
     need = 10 - confirmed_count
     if need <= 0:
-        return api_get_plan()
+        return api_get_plan(request)
 
     try:
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -618,7 +665,7 @@ def api_generate_plan():
     # Bilder im Hintergrund herunterladen
     image_service.trigger_image_generation([dict(r) for r in saved], diet_type=diet_type)
 
-    return api_get_plan()
+    return api_get_plan(request)
 
 
 @app.post("/api/recipes/{recipe_id}/confirm")
@@ -666,10 +713,10 @@ def api_toggle_favorite(recipe_id: int):
 
 
 @app.post("/api/reset")
-def api_reset():
+def api_reset(request: Request):
     """Setzt Onboarding + alle Präferenzen zurück und löscht den aktuellen Plan."""
+    uid = get_uid(request)
     conn = get_db()
-    # Alle Einstellungen auf Defaults zurücksetzen
     defaults = {
         "persons": "2",
         "preferred_cuisines": "[]",
@@ -682,10 +729,9 @@ def api_reset():
         "onboarding_complete": "false",
     }
     for key, value in defaults.items():
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-    # Aktuellen Wochenplan und nicht-favorisierte Rezepte löschen
+        conn.execute("INSERT OR REPLACE INTO settings (user_id, key, value) VALUES (?, ?, ?)", (uid, key, value))
     week_start = current_week_start()
-    plan = conn.execute("SELECT id FROM weekly_plans WHERE week_start=?", (week_start,)).fetchone()
+    plan = conn.execute("SELECT id FROM weekly_plans WHERE week_start=? AND user_id=?", (week_start, uid)).fetchone()
     if plan:
         fav_ids = [r["id"] for r in conn.execute(
             "SELECT id FROM recipes WHERE plan_id=? AND favorite=1", (plan["id"],)
@@ -746,17 +792,22 @@ def api_get_archive():
 
 
 @app.get("/api/favorites")
-def api_get_favorites():
+def api_get_favorites(request: Request):
+    uid = get_uid(request)
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM recipes WHERE favorite=1 ORDER BY created_at DESC"
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT r.* FROM recipes r
+        JOIN weekly_plans wp ON r.plan_id = wp.id
+        WHERE r.favorite=1 AND wp.user_id=?
+        ORDER BY r.created_at DESC
+    """, (uid,)).fetchall()
     conn.close()
     return {"recipes": [dict(r) for r in rows]}
 
 
 @app.post("/api/recipes/{recipe_id}/regenerate")
-def api_regenerate_recipe(recipe_id: int):
+def api_regenerate_recipe(request: Request, recipe_id: int):
+    uid = get_uid(request)
     conn = get_db()
     c = conn.cursor()
     recipe = c.execute("SELECT * FROM recipes WHERE id=?", (recipe_id,)).fetchone()
@@ -771,12 +822,12 @@ def api_regenerate_recipe(recipe_id: int):
     ).fetchall()]
     conn.close()
 
-    preferred_cuisines = json.loads(get_setting("preferred_cuisines",    "[]"))
-    preferred_ings     = json.loads(get_setting("preferred_ingredients", "[]"))
-    speed_refinement   = int(get_setting("speed_refinement", "3"))
-    health_comfort     = int(get_setting("health_comfort",   "3"))
-    diet_type          = get_setting("diet_type", "alles")
-    allergies          = json.loads(get_setting("allergies", "[]"))
+    preferred_cuisines = json.loads(get_setting("preferred_cuisines",    "[]", uid))
+    preferred_ings     = json.loads(get_setting("preferred_ingredients", "[]", uid))
+    speed_refinement   = int(get_setting("speed_refinement", "3", uid))
+    health_comfort     = int(get_setting("health_comfort",   "3", uid))
+    diet_type          = get_setting("diet_type", "alles", uid)
+    allergies          = json.loads(get_setting("allergies", "[]", uid))
 
     try:
         nr = generate_with_claude(
@@ -810,7 +861,7 @@ def api_regenerate_recipe(recipe_id: int):
     ))
     conn.commit()
     conn.close()
-    return api_get_plan()
+    return api_get_plan(request)
 
 
 # ─────────────────────────────────────────────
@@ -818,11 +869,12 @@ def api_regenerate_recipe(recipe_id: int):
 # ─────────────────────────────────────────────
 
 @app.get("/api/plan/ingredients")
-def api_get_ingredients():
+def api_get_ingredients(request: Request):
+    uid = get_uid(request)
     week_start = current_week_start()
     conn = get_db()
     plan = conn.execute(
-        "SELECT * FROM weekly_plans WHERE week_start=?", (week_start,)
+        "SELECT * FROM weekly_plans WHERE week_start=? AND user_id=?", (week_start, uid)
     ).fetchone()
     if not plan:
         conn.close()
@@ -907,6 +959,141 @@ def api_generate_image(recipe_id: int):
         "diet_type": get_setting("diet_type", "alles"),
     })
     return {"ok": True, "cached": False, "message": "In Warteschlange"}
+
+
+# ─────────────────────────────────────────────
+# REWE-Integration (Pepesto API)
+# ─────────────────────────────────────────────
+
+import urllib.request
+
+_rewe_catalog_cache = {"data": None, "timestamp": 0}
+REWE_CACHE_TTL = 24 * 3600  # 24 Stunden
+
+
+def _load_rewe_catalog() -> list:
+    """Lädt REWE-Katalog von Pepesto und cacht ihn für 24h."""
+    import time
+    now = time.time()
+
+    if _rewe_catalog_cache["data"] and (now - _rewe_catalog_cache["timestamp"]) < REWE_CACHE_TTL:
+        return _rewe_catalog_cache["data"]
+
+    pepesto_key = os.getenv("PEPESTO_API_KEY", "")
+    if not pepesto_key:
+        return []
+
+    try:
+        payload = json.dumps({"supermarket_domain": "shop.rewe.de"}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://s.pepesto.com/api/catalog",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {pepesto_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        resp = urllib.request.urlopen(req, timeout=30)
+        data = json.loads(resp.read().decode("utf-8"))
+
+        products = []
+        for url, p in data.get("parsed_products", {}).items():
+            names = p.get("names", {})
+            products.append({
+                "id": url,
+                "name": names.get("de", ""),
+                "name_en": names.get("en", ""),
+                "price": p.get("price", 0) / 100,  # Cent → Euro
+                "quantity": p.get("quantity_str", ""),
+                "image": p.get("self_hosted_image", ""),
+                "entity": p.get("entity_name", ""),
+            })
+
+        _rewe_catalog_cache["data"] = products
+        _rewe_catalog_cache["timestamp"] = now
+        return products
+
+    except Exception as e:
+        print(f"REWE Katalog Fehler: {e}")
+        return []
+
+
+def _search_rewe_product(catalog: list, query: str) -> dict:
+    """Fuzzy-Suche im gecachten Katalog."""
+    query_lower = query.lower().strip()
+    query_words = query_lower.split()
+
+    best_match = None
+    best_score = 0
+
+    for p in catalog:
+        name = p["name"].lower()
+        entity = p["entity"].lower()
+
+        # Exakter Name-Match
+        if query_lower in name:
+            score = 100 - len(name)  # Kürzere Namen bevorzugen
+            if score > best_score:
+                best_score = score
+                best_match = p
+            continue
+
+        # Entity-Match (z.B. "Tomate" → "Tomato")
+        if query_lower in entity:
+            score = 50
+            if score > best_score:
+                best_score = score
+                best_match = p
+            continue
+
+        # Wort-Match
+        matches = sum(1 for w in query_words if w in name or w in entity)
+        if matches > 0:
+            score = matches * 20
+            if score > best_score:
+                best_score = score
+                best_match = p
+
+    return best_match
+
+
+@app.post("/api/rewe/search")
+def api_rewe_search(payload: Dict[str, Any]):
+    """Sucht Zutaten im REWE-Katalog."""
+    ingredients = payload.get("ingredients", [])
+    catalog = _load_rewe_catalog()
+
+    if not catalog:
+        return {
+            "products": [{"ingredient": i.get("name",""), "found": False} for i in ingredients],
+            "warning": "REWE-Katalog konnte nicht geladen werden.",
+        }
+
+    results = []
+    for ing in ingredients:
+        name = ing.get("name", "")
+        match = _search_rewe_product(catalog, name)
+        if match:
+            results.append({
+                "ingredient": name,
+                "quantity": ing.get("quantity", ""),
+                "unit": ing.get("unit", ""),
+                "found": True,
+                "product_name": match["name"],
+                "product_price": match["price"],
+                "product_quantity": match["quantity"],
+                "product_image": match["image"],
+                "selected": True,
+            })
+        else:
+            results.append({
+                "ingredient": name,
+                "quantity": ing.get("quantity", ""),
+                "unit": ing.get("unit", ""),
+                "found": False,
+            })
+
+    return {"products": results}
 
 
 # ─────────────────────────────────────────────
