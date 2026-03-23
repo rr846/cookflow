@@ -1486,6 +1486,9 @@ function recipeImageUrl(id, name, cuisine) {
   return `/api/images/${id}.jpg`;
 }
 
+// Cache: merkt sich welche Bilder erfolgreich geladen wurden
+const _loadedImages = new Set();
+
 // Robustes Bildladen mit Retry-Polling
 const _imageLoadActive = new Set();
 
@@ -1683,9 +1686,11 @@ function recipeCardHTML(r) {
       <div class="recipe-img-wrap" onclick="openDetail(${r.id})" style="background:${gradient}">
         <div class="img-placeholder" id="ph-${r.id}">${emoji}</div>
         <div class="img-loading-ring" id="ring-${r.id}"></div>
-        <img class="recipe-img" id="img-${r.id}"
+        <img class="recipe-img ${_loadedImages.has(r.id) ? 'loaded' : ''}" id="img-${r.id}"
+             src="${imgUrl}"
              alt="${esc(r.name)}"
-             onload="this.classList.add('loaded'); document.getElementById('ring-${r.id}').style.display='none';" />
+             onload="_loadedImages.add(${r.id}); this.classList.add('loaded'); var ring=document.getElementById('ring-${r.id}'); if(ring) ring.style.display='none';"
+             onerror="this.style.display='none'; var ring=document.getElementById('ring-${r.id}'); if(ring) ring.style.display='none'; triggerImageGen(${r.id});" />
       </div>
       <div class="recipe-body">
         <div class="recipe-tags">
