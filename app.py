@@ -979,8 +979,10 @@ def _load_rewe_catalog() -> list:
     if _rewe_catalog_cache["data"] and (now - _rewe_catalog_cache["timestamp"]) < REWE_CACHE_TTL:
         return _rewe_catalog_cache["data"]
 
+    load_dotenv()  # Re-read .env in case it was updated
     pepesto_key = os.getenv("PEPESTO_API_KEY", "")
     if not pepesto_key:
+        print("PEPESTO_API_KEY nicht gesetzt!")
         return []
 
     try:
