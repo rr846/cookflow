@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Cookflow</title>
   <link href="https://fonts.googleapis.com/css2?family=PT+Serif:wght@400;700&display=swap" rel="stylesheet" />
   <style>
@@ -173,6 +173,19 @@
 
       .settings-card {
         padding: 16px !important;
+      }
+
+      /* Safe area für mobile Browser-Toolbar */
+      .view {
+        padding-bottom: calc(80px + env(safe-area-inset-bottom, 20px)) !important;
+      }
+
+      .shopping-cta {
+        margin-bottom: calc(20px + env(safe-area-inset-bottom, 20px)) !important;
+      }
+
+      body {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
       }
     }
 
