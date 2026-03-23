@@ -970,7 +970,7 @@ import urllib.request
 
 def _get_pepesto_key() -> str:
     load_dotenv()
-    return os.getenv("PEPESTO_API_KEY", "")
+    return os.getenv("PEPESTO_API_KEY", "").strip()
 
 
 @app.post("/api/rewe/checkout")
