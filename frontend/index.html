@@ -2173,20 +2173,23 @@ async function loadSettings() {
     S.onboardingComplete  = data.onboarding_complete === 'true';
     S.nutritionFocus      = JSON.parse(data.nutrition_focus || '[]');
 
+    // Onboarding ZUERST prüfen – bevor Render-Fehler das blockieren
+    if (!S.onboardingComplete) showOnboarding();
+
     document.getElementById('s-persons').value = S.persons;
     document.getElementById('s-speed').value   = S.speedRefinement;
     document.getElementById('s-health').value  = S.healthComfort;
     document.getElementById('s-speed-label').textContent  = SPEED_LABELS[S.speedRefinement];
     document.getElementById('s-health-label').textContent = HEALTH_LABELS[S.healthComfort];
 
-    renderDietChips();
-    renderAllergyChips();
-    renderCuisineChips();
-    renderNutritionFocusChips();
-    renderIngredientTags();
-
-    if (!S.onboardingComplete) showOnboarding();
-  } catch {}
+    try {
+      renderDietChips();
+      renderAllergyChips();
+      renderCuisineChips();
+      renderNutritionFocusChips();
+      renderIngredientTags();
+    } catch (e) { console.error('Settings render error:', e); }
+  } catch (e) { console.error('loadSettings error:', e); }
 }
 
 // ─────────────────────────────────────────────
