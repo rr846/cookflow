@@ -2073,8 +2073,8 @@ function renderIngredientsList() {
       <button class="btn btn-primary" onclick="copySelectedIngredients()">
         📋 Einkaufsliste kopieren (${includedCount})
       </button>
-      <button class="btn btn-ghost" onclick="searchRewe()" id="rewe-btn" style="border:2px solid var(--orange);">
-        🛒 Bei REWE suchen
+      <button class="btn btn-ghost" onclick="reweCheckout()" id="rewe-btn" style="border:2px solid var(--orange); font-weight:700;">
+        🛒 Bei REWE bestellen
       </button>
       <span style="font-size:13px; color:var(--gray-400);">${ings.length - includedCount} ausgeschlossen</span>
     </div>
@@ -2091,57 +2091,55 @@ function setAllIngredients(val) {
   renderIngredientsList();
 }
 
-async function searchRewe() {
+async function reweCheckout() {
   const selected = S.shoppingIngs.filter(i => i.included);
   if (!selected.length) { toast('Keine Zutaten ausgewählt', true); return; }
 
   const btn = document.getElementById('rewe-btn');
   btn.disabled = true;
-  btn.textContent = '⏳ Suche läuft…';
+  btn.innerHTML = '⏳ Warenkorb wird erstellt…';
 
   try {
-    const res = await fetch('/api/rewe/search', {
+    const res = await fetch('/api/rewe/checkout', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ ingredients: selected }),
     });
     const data = await res.json();
 
-    if (data.warning) { toast(data.warning, true); return; }
+    if (!res.ok) {
+      toast(data.detail || 'Fehler beim REWE-Checkout', true);
+      return;
+    }
 
-    const products = data.products || [];
-    const found = products.filter(p => p.found);
-    const notFound = products.filter(p => !p.found);
-    const totalPrice = found.reduce((s, p) => s + (p.product_price || 0), 0);
-
-    const resultsDiv = document.getElementById('rewe-results');
-    resultsDiv.innerHTML = `
-      <div style="margin-top:20px; padding-top:16px; border-top:2px solid var(--gray-100);">
-        <h3 style="margin-bottom:12px;">🛒 REWE Produkte (${found.length}/${products.length} gefunden)</h3>
-        ${found.map(p => `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--gray-100);">
-            <div>
-              <div style="font-weight:600;">${esc(p.product_name)}</div>
-              <div style="font-size:12px; color:var(--gray-400);">für: ${esc(p.ingredient)} (${p.quantity} ${p.unit})</div>
-            </div>
-            <div style="font-weight:700; color:var(--green-dark); white-space:nowrap;">€${p.product_price.toFixed(2)}</div>
-          </div>
-        `).join('')}
-        ${notFound.length ? `
-          <div style="margin-top:12px; padding:10px; background:var(--gray-100); border-radius:var(--radius-sm);">
-            <div style="font-size:13px; font-weight:600; color:var(--gray-600); margin-bottom:6px;">Nicht gefunden (${notFound.length}):</div>
-            ${notFound.map(p => `<span style="font-size:12px; color:var(--gray-400);">${esc(p.ingredient)}, </span>`).join('')}
-          </div>
-        ` : ''}
-        <div style="text-align:right; font-weight:700; font-size:18px; margin-top:16px; color:var(--green-dark);">
-          REWE Gesamtpreis: €${totalPrice.toFixed(2)}
-        </div>
-      </div>`;
+    if (data.ok && data.redirect_url) {
+      // Erfolg: Redirect-Link anzeigen
+      const resultsDiv = document.getElementById('rewe-results');
+      resultsDiv.innerHTML = `
+        <div style="margin-top:20px; padding:24px; background:var(--green-dark); border-radius:var(--radius-card); color:#fff; text-align:center;">
+          <div style="font-size:32px; margin-bottom:12px;">✓</div>
+          <h3 style="margin-bottom:8px; color:#fff;">Warenkorb erstellt!</h3>
+          <p style="font-size:14px; color:rgba(255,255,255,0.7); margin-bottom:20px;">
+            ${selected.length} Zutaten wurden für dich zusammengestellt.
+            Klicke auf den Button um bei REWE auszuchecken.
+          </p>
+          <a href="${data.redirect_url}" target="_blank" rel="noopener"
+             style="display:inline-block; padding:14px 32px; background:var(--orange); color:#fff; border-radius:var(--radius-pill); font-weight:700; font-size:16px; text-decoration:none;">
+            🛒 Jetzt bei REWE bestellen →
+          </a>
+          <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-top:16px;">
+            Du wirst zu REWE weitergeleitet. Dort kannst du den Warenkorb prüfen und die Bestellung abschließen.
+          </p>
+        </div>`;
+      toast('REWE-Warenkorb erstellt! 🎉');
+    } else {
+      toast(data.error || 'Warenkorb konnte nicht erstellt werden.', true);
+    }
   } catch (e) {
-    toast('REWE-Suche fehlgeschlagen: ' + e.message, true);
+    toast('REWE-Checkout fehlgeschlagen: ' + e.message, true);
   } finally {
     btn.disabled = false;
-    btn.textContent = '🛒 Bei REWE suchen';
+    btn.innerHTML = '🛒 Bei REWE bestellen';
   }
 }
 

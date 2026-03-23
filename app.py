@@ -962,140 +962,76 @@ def api_generate_image(recipe_id: int):
 
 
 # ─────────────────────────────────────────────
-# REWE-Integration (Pepesto API)
+# REWE-Integration (Pepesto Oneshot API)
 # ─────────────────────────────────────────────
 
 import urllib.request
 
-_rewe_catalog_cache = {"data": None, "timestamp": 0}
-REWE_CACHE_TTL = 24 * 3600  # 24 Stunden
+
+def _get_pepesto_key() -> str:
+    load_dotenv()
+    return os.getenv("PEPESTO_API_KEY", "")
 
 
-def _load_rewe_catalog() -> list:
-    """Lädt REWE-Katalog von Pepesto und cacht ihn für 24h."""
-    import time
-    now = time.time()
+@app.post("/api/rewe/checkout")
+def api_rewe_checkout(payload: Dict[str, Any]):
+    """Erstellt einen REWE-Warenkorb via Pepesto Oneshot.
 
-    if _rewe_catalog_cache["data"] and (now - _rewe_catalog_cache["timestamp"]) < REWE_CACHE_TTL:
-        return _rewe_catalog_cache["data"]
+    Sendet die Zutatenliste als Text → bekommt redirect_url zurück.
+    User klickt den Link → landet im REWE-Checkout mit allen Produkten.
+    """
+    ingredients = payload.get("ingredients", [])
+    pepesto_key = _get_pepesto_key()
 
-    load_dotenv()  # Re-read .env in case it was updated
-    pepesto_key = os.getenv("PEPESTO_API_KEY", "")
     if not pepesto_key:
-        print("PEPESTO_API_KEY nicht gesetzt!")
-        return []
+        raise HTTPException(status_code=400, detail="PEPESTO_API_KEY nicht konfiguriert.")
+
+    if not ingredients:
+        raise HTTPException(status_code=400, detail="Keine Zutaten ausgewählt.")
+
+    # Zutatenliste als Text zusammenbauen
+    shopping_text = "\n".join(
+        f"{ing.get('quantity', '')} {ing.get('unit', '')} {ing.get('name', '')}".strip()
+        for ing in ingredients
+        if ing.get("name")
+    )
 
     try:
-        payload = json.dumps({"supermarket_domain": "shop.rewe.de"}).encode("utf-8")
+        request_data = json.dumps({
+            "content_text": shopping_text,
+            "supermarket_domain": "shop.rewe.de",
+        }).encode("utf-8")
+
         req = urllib.request.Request(
-            "https://s.pepesto.com/api/catalog",
-            data=payload,
+            "https://s.pepesto.com/api/oneshot",
+            data=request_data,
             headers={
                 "Authorization": f"Bearer {pepesto_key}",
                 "Content-Type": "application/json",
             },
         )
-        resp = urllib.request.urlopen(req, timeout=30)
+        resp = urllib.request.urlopen(req, timeout=60)
         data = json.loads(resp.read().decode("utf-8"))
 
-        products = []
-        for url, p in data.get("parsed_products", {}).items():
-            names = p.get("names", {})
-            products.append({
-                "id": url,
-                "name": names.get("de", ""),
-                "name_en": names.get("en", ""),
-                "price": p.get("price", 0) / 100,  # Cent → Euro
-                "quantity": p.get("quantity_str", ""),
-                "image": p.get("self_hosted_image", ""),
-                "entity": p.get("entity_name", ""),
-            })
-
-        _rewe_catalog_cache["data"] = products
-        _rewe_catalog_cache["timestamp"] = now
-        return products
-
-    except Exception as e:
-        print(f"REWE Katalog Fehler: {e}")
-        return []
-
-
-def _search_rewe_product(catalog: list, query: str) -> dict:
-    """Fuzzy-Suche im gecachten Katalog."""
-    query_lower = query.lower().strip()
-    query_words = query_lower.split()
-
-    best_match = None
-    best_score = 0
-
-    for p in catalog:
-        name = p["name"].lower()
-        entity = p["entity"].lower()
-
-        # Exakter Name-Match
-        if query_lower in name:
-            score = 100 - len(name)  # Kürzere Namen bevorzugen
-            if score > best_score:
-                best_score = score
-                best_match = p
-            continue
-
-        # Entity-Match (z.B. "Tomate" → "Tomato")
-        if query_lower in entity:
-            score = 50
-            if score > best_score:
-                best_score = score
-                best_match = p
-            continue
-
-        # Wort-Match
-        matches = sum(1 for w in query_words if w in name or w in entity)
-        if matches > 0:
-            score = matches * 20
-            if score > best_score:
-                best_score = score
-                best_match = p
-
-    return best_match
-
-
-@app.post("/api/rewe/search")
-def api_rewe_search(payload: Dict[str, Any]):
-    """Sucht Zutaten im REWE-Katalog."""
-    ingredients = payload.get("ingredients", [])
-    catalog = _load_rewe_catalog()
-
-    if not catalog:
-        return {
-            "products": [{"ingredient": i.get("name",""), "found": False} for i in ingredients],
-            "warning": "REWE-Katalog konnte nicht geladen werden.",
-        }
-
-    results = []
-    for ing in ingredients:
-        name = ing.get("name", "")
-        match = _search_rewe_product(catalog, name)
-        if match:
-            results.append({
-                "ingredient": name,
-                "quantity": ing.get("quantity", ""),
-                "unit": ing.get("unit", ""),
-                "found": True,
-                "product_name": match["name"],
-                "product_price": match["price"],
-                "product_quantity": match["quantity"],
-                "product_image": match["image"],
-                "selected": True,
-            })
+        redirect_url = data.get("redirect_url", "")
+        if redirect_url:
+            return {
+                "ok": True,
+                "redirect_url": redirect_url,
+                "message": "Warenkorb erstellt! Klicke den Link um bei REWE auszuchecken.",
+            }
         else:
-            results.append({
-                "ingredient": name,
-                "quantity": ing.get("quantity", ""),
-                "unit": ing.get("unit", ""),
-                "found": False,
-            })
+            return {
+                "ok": False,
+                "error": "Kein Redirect-Link erhalten.",
+                "debug": str(data)[:200],
+            }
 
-    return {"products": results}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:300]
+        raise HTTPException(status_code=e.code, detail=f"Pepesto Fehler: {body}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"REWE-Checkout fehlgeschlagen: {e}")
 
 
 # ─────────────────────────────────────────────
