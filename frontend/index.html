@@ -896,8 +896,11 @@
       font-weight: 700;
       color: var(--black);
       max-width: 420px;
+      min-height: 60px;
       line-height: 1.5;
-      animation: obFadeIn 0.5s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       transition: opacity 0.4s;
     }
     .loading-sub {
@@ -2435,13 +2438,15 @@ async function showLoadingOverlay() {
   txt.textContent = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
   el.style.display = 'flex';
 
-  // Rotierende Texte
+  // Rotierende Texte – sauber ein/ausblenden ohne Überlappung
+  let _msgIdx = 0;
   _loadingInterval = setInterval(() => {
     txt.style.opacity = 0;
     setTimeout(() => {
-      txt.textContent = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
+      _msgIdx = (_msgIdx + 1) % LOADING_MESSAGES.length;
+      txt.textContent = LOADING_MESSAGES[_msgIdx];
       txt.style.opacity = 1;
-    }, 400);
+    }, 500);
   }, 4000);
 
   // Bilder für den Ladekreis immer frisch laden
@@ -2480,19 +2485,42 @@ async function showLoadingOverlay() {
     return;
   }
 
-  // Bilder vorher preloaden damit sie sofort angezeigt werden können
+  // Bilder vorher preloaden (max 3 Sek warten)
   const preloaded = [];
   const preloadPromises = existingImages.slice(0, 10).map(url => {
     return new Promise(resolve => {
       const img = new Image();
       img.onload = () => { preloaded.push(url); resolve(); };
-      img.onerror = () => resolve(); // Fehlerhafte überspringen
+      img.onerror = () => resolve();
       img.src = url;
+      setTimeout(resolve, 3000); // Max 3s pro Bild warten
     });
   });
   await Promise.all(preloadPromises);
 
-  if (preloaded.length === 0) return;
+  if (preloaded.length === 0) {
+    // Emoji Fallback wenn gar kein Bild geladen werden konnte
+    const fallbackEl2 = document.getElementById('load-img-0');
+    if (fallbackEl2) {
+      fallbackEl2.style.display = 'none';
+      const wrap2 = fallbackEl2.parentElement;
+      let emojiEl2 = document.getElementById('load-emoji-fallback');
+      if (!emojiEl2) {
+        emojiEl2 = document.createElement('div');
+        emojiEl2.id = 'load-emoji-fallback';
+        emojiEl2.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:64px;border-radius:50%;background:var(--green-dark-lt);';
+        wrap2.appendChild(emojiEl2);
+      }
+      const emojis2 = ['🍜','🥗','🍝','🥘','🍲','🍛'];
+      let ei2 = 0;
+      emojiEl2.textContent = emojis2[0];
+      _loadingImageInterval = setInterval(() => {
+        ei2 = (ei2 + 1) % emojis2.length;
+        emojiEl2.textContent = emojis2[ei2];
+      }, 2000);
+    }
+    return;
+  }
 
   const imgs = [
     document.getElementById('load-img-0'),
