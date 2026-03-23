@@ -1961,8 +1961,13 @@ function renderIngredientsList() {
       <button class="btn btn-primary" onclick="copySelectedIngredients()">
         📋 Einkaufsliste kopieren (${includedCount})
       </button>
+      <button class="btn btn-ghost" onclick="searchRewe()" id="rewe-btn" style="border:2px solid var(--orange);">
+        🛒 Bei REWE suchen
+      </button>
       <span style="font-size:13px; color:var(--gray-400);">${ings.length - includedCount} ausgeschlossen</span>
-    </div>`;
+    </div>
+    <div id="rewe-results"></div>`;
+}
 }
 
 function toggleIngredient(idx) {
@@ -1973,6 +1978,60 @@ function toggleIngredient(idx) {
 function setAllIngredients(val) {
   S.shoppingIngs.forEach(i => i.included = val);
   renderIngredientsList();
+}
+
+async function searchRewe() {
+  const selected = S.shoppingIngs.filter(i => i.included);
+  if (!selected.length) { toast('Keine Zutaten ausgewählt', true); return; }
+
+  const btn = document.getElementById('rewe-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Suche läuft…';
+
+  try {
+    const res = await fetch('/api/rewe/search', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ ingredients: selected }),
+    });
+    const data = await res.json();
+
+    if (data.warning) { toast(data.warning, true); return; }
+
+    const products = data.products || [];
+    const found = products.filter(p => p.found);
+    const notFound = products.filter(p => !p.found);
+    const totalPrice = found.reduce((s, p) => s + (p.product_price || 0), 0);
+
+    const resultsDiv = document.getElementById('rewe-results');
+    resultsDiv.innerHTML = `
+      <div style="margin-top:20px; padding-top:16px; border-top:2px solid var(--gray-100);">
+        <h3 style="margin-bottom:12px;">🛒 REWE Produkte (${found.length}/${products.length} gefunden)</h3>
+        ${found.map(p => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--gray-100);">
+            <div>
+              <div style="font-weight:600;">${esc(p.product_name)}</div>
+              <div style="font-size:12px; color:var(--gray-400);">für: ${esc(p.ingredient)} (${p.quantity} ${p.unit})</div>
+            </div>
+            <div style="font-weight:700; color:var(--green-dark); white-space:nowrap;">€${p.product_price.toFixed(2)}</div>
+          </div>
+        `).join('')}
+        ${notFound.length ? `
+          <div style="margin-top:12px; padding:10px; background:var(--gray-100); border-radius:var(--radius-sm);">
+            <div style="font-size:13px; font-weight:600; color:var(--gray-600); margin-bottom:6px;">Nicht gefunden (${notFound.length}):</div>
+            ${notFound.map(p => `<span style="font-size:12px; color:var(--gray-400);">${esc(p.ingredient)}, </span>`).join('')}
+          </div>
+        ` : ''}
+        <div style="text-align:right; font-weight:700; font-size:18px; margin-top:16px; color:var(--green-dark);">
+          REWE Gesamtpreis: €${totalPrice.toFixed(2)}
+        </div>
+      </div>`;
+  } catch (e) {
+    toast('REWE-Suche fehlgeschlagen: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🛒 Bei REWE suchen';
+  }
 }
 
 async function copySelectedIngredients() {
@@ -2262,18 +2321,16 @@ async function showLoadingOverlay() {
     }, 400);
   }, 4000);
 
-  // Bilder für den Ladekreis laden (falls noch nicht geschehen)
-  if (_allImageUrls.length === 0) {
-    try {
-      const imgRes = await fetch('/api/images/available');
-      const imgData = await imgRes.json();
-      _availableImageIds = imgData.ids || [];
-      _allImageUrls = [
-        ..._availableImageIds.map(id => `/api/images/${id}.jpg`),
-        ...(imgData.archive || []),
-      ];
-    } catch (_) {}
-  }
+  // Bilder für den Ladekreis immer frisch laden
+  try {
+    const imgRes = await fetch('/api/images/available');
+    const imgData = await imgRes.json();
+    _availableImageIds = imgData.ids || [];
+    _allImageUrls = [
+      ..._availableImageIds.map(id => `/api/images/${id}.jpg`),
+      ...(imgData.archive || []),
+    ];
+  } catch (_) {}
 
   const existingImages = [..._allImageUrls];
   if (existingImages.length === 0) return;
