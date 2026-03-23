@@ -261,7 +261,7 @@
     }
 
     .tag-cuisine { background: var(--yellow); color: var(--black); }
-    .tag-time    { background: rgba(255,255,255,0.15); color: #fff; }
+    .tag-time    { background: rgba(0,0,0,0.45); color: #fff; }
     .tag-lime    { background: var(--lime); color: var(--green-dark); }
 
     .recipe-name {
@@ -1762,7 +1762,12 @@ function openDetail(id) {
       <span style="font-size:11px; color:var(--gray-400); font-style:italic;">* Preisschätzung basierend auf deutschen Supermarktpreisen</span>
     </li>` : '');
 
-  // Nährwerte (alte entfernen, neue einfügen)
+  const stepList = document.getElementById('detail-steps');
+  stepList.innerHTML = (r.steps || []).map((s, idx) =>
+    `<li><div class="step-num">${idx+1}</div><span>${esc(s)}</span></li>`
+  ).join('');
+
+  // Nährwerte NACH Zubereitung einfügen
   const oldNutrition = document.getElementById('detail-nutrition');
   if (oldNutrition) oldNutrition.remove();
   const n = r.nutrition;
@@ -1774,7 +1779,7 @@ function openDetail(id) {
       { value: n.fat,      unit: 'g', label: 'Fett',    color: '#9b59b6', icon: '🫒' },
       { value: n.fiber,    unit: 'g', label: 'Ballast.', color: '#27ae60', icon: '🥦' },
     ];
-    document.getElementById('detail-steps').parentElement.insertAdjacentHTML('beforebegin', `
+    stepList.parentElement.insertAdjacentHTML('afterend', `
       <div class="detail-section" id="detail-nutrition">
         <h3>Nährwerte <span style="font-weight:400; font-size:13px; color:var(--gray-400);">pro Portion</span></h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
@@ -1789,11 +1794,6 @@ function openDetail(id) {
       </div>
     `);
   }
-
-  const stepList = document.getElementById('detail-steps');
-  stepList.innerHTML = (r.steps || []).map((s, idx) =>
-    `<li><div class="step-num">${idx+1}</div><span>${esc(s)}</span></li>`
-  ).join('');
 
   document.getElementById('detail-overlay').classList.add('open');
 }
@@ -2239,7 +2239,7 @@ const LOADING_MESSAGES = [
 ];
 let _loadingInterval = null;
 
-function showLoadingOverlay() {
+async function showLoadingOverlay() {
   const el = document.getElementById('loading-overlay');
   const txt = document.getElementById('loading-text');
   txt.textContent = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
@@ -2254,32 +2254,59 @@ function showLoadingOverlay() {
     }, 400);
   }, 4000);
 
-  // Alle Bilder nutzen (aktuelle + Archiv) für den Ladekreis
-  const existingImages = [..._allImageUrls];
+  // Bilder für den Ladekreis laden (falls noch nicht geschehen)
+  if (_allImageUrls.length === 0) {
+    try {
+      const imgRes = await fetch('/api/images/available');
+      const imgData = await imgRes.json();
+      _availableImageIds = imgData.ids || [];
+      _allImageUrls = [
+        ..._availableImageIds.map(id => `/api/images/${id}.jpg`),
+        ...(imgData.archive || []),
+      ];
+    } catch (_) {}
+  }
 
-  let imgIdx = 0;
+  const existingImages = [..._allImageUrls];
+  if (existingImages.length === 0) return;
+
+  // Bilder vorher preloaden damit sie sofort angezeigt werden können
+  const preloaded = [];
+  const preloadPromises = existingImages.slice(0, 10).map(url => {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => { preloaded.push(url); resolve(); };
+      img.onerror = () => resolve(); // Fehlerhafte überspringen
+      img.src = url;
+    });
+  });
+  await Promise.all(preloadPromises);
+
+  if (preloaded.length === 0) return;
+
   const imgs = [
     document.getElementById('load-img-0'),
     document.getElementById('load-img-1'),
     document.getElementById('load-img-2'),
   ];
 
-  // Erstes Bild sofort setzen
-  if (existingImages.length > 0) {
-    imgs[0].src = existingImages[0];
-    imgs[0].classList.add('active');
-  }
+  let imgIdx = 0;
+
+  // Erstes Bild sofort setzen (bereits preloaded → zeigt sofort)
+  imgs[0].src = preloaded[0];
+  imgs[0].classList.add('active');
 
   // Alle 2.5s zum nächsten Bild wechseln
   _loadingImageInterval = setInterval(() => {
-    if (existingImages.length < 2) return;
+    if (preloaded.length < 2) return;
     const current = imgIdx % 3;
     const next = (imgIdx + 1) % 3;
     imgIdx++;
-    const nextSrc = existingImages[imgIdx % existingImages.length];
+    const nextSrc = preloaded[imgIdx % preloaded.length];
     imgs[next].src = nextSrc;
+    // Bild ist preloaded → sofort sichtbar
     imgs[next].classList.add('active');
-    setTimeout(() => imgs[current].classList.remove('active'), 100);
+    setTimeout(() => imgs[current].classList.remove('active'), 300);
   }, 2500);
 }
 

@@ -1,0 +1,8 @@
+.env
+.DS_Store
+meal_planner.db
+images/
+images/archive/
+__pycache__/
+*.pyc
+.claude/

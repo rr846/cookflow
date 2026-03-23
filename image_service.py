@@ -31,8 +31,8 @@ def _get_token() -> str:
     """Lazy Token-Laden – wird erst bei Bedarf aus Environment gelesen."""
     return os.getenv("REPLICATE_API_TOKEN", "")
 
-# FLUX 1.1 Pro – hochwertige fotorealistische Bilder (~$0.04/Bild)
-REPLICATE_MODEL = "black-forest-labs/flux-1.1-pro"
+# FLUX Schnell – schnell, gute Qualität (~$0.003/Bild, ~2 Sek)
+REPLICATE_MODEL = "black-forest-labs/flux-schnell"
 
 
 # ─────────────────────────────────────────────
@@ -132,7 +132,12 @@ def build_image_prompt_with_claude(name: str, cuisine: str = "", ingredients: li
         msg = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=150,
-            messages=[{"role": "user", "content": f"""Describe this dish visually in English for an AI image generator. Write ONE short paragraph (max 2 sentences) describing exactly what this dish looks like on a plate — colors, textures, arrangement. Be specific and concrete.
+            messages=[{"role": "user", "content": f"""You are writing a prompt for an AI image generator (FLUX). Describe this dish visually in English. Write ONE short paragraph (max 2 sentences) describing exactly what this finished dish looks like on a plate — colors, textures, arrangement, garnishes. Be very specific and concrete.
+
+IMPORTANT RULES:
+- Describe ONLY the actual food, no people, no hands, no text, no watermarks, no logos
+- If the dish is {diet_type or 'any'} diet, make sure the description matches (e.g. vegan = NO eggs, NO meat, NO dairy visible)
+- Focus on what IS visible, not what's absent
 
 Dish: {name}
 Cuisine: {cuisine or 'International'}
@@ -155,12 +160,106 @@ Reply ONLY with the visual description, nothing else."""}]
         return build_image_prompt_fallback(name, cuisine, ingredients, description, diet_type)
 
 
+def build_batch_prompts_with_claude(recipes: list, diet_type: str = "") -> dict:
+    """Generiert Bildprompts für ALLE Rezepte in EINEM Claude-Call.
+
+    Returns: Dict {recipe_id: prompt_string}
+    """
+    import anthropic
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+
+    result = {}
+    if not api_key or not recipes:
+        for r in recipes:
+            rid = r.get("id", 0)
+            result[rid] = build_image_prompt_fallback(
+                r.get("name", ""), r.get("cuisine", ""),
+                r.get("ingredients", []), r.get("description", ""), diet_type
+            )
+        return result
+
+    # Alle Rezepte in einem Prompt bündeln
+    dish_list = []
+    for i, r in enumerate(recipes):
+        ings = r.get("ingredients", [])
+        if isinstance(ings, str):
+            try: ings = json.loads(ings)
+            except: ings = []
+        ing_names = [x.get("name","") for x in ings if isinstance(x, dict) and x.get("name")]
+        dish_list.append(
+            f"{i+1}. {r.get('name','')} | Cuisine: {r.get('cuisine','')} | "
+            f"Ingredients: {', '.join(ing_names[:5])}"
+        )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": f"""You are writing prompts for an AI image generator (FLUX). For each dish below, write ONE sentence describing exactly what the finished dish looks like on a plate — colors, textures, arrangement. Be specific and concrete.
+
+RULES:
+- Describe ONLY the food, no people, hands, text, watermarks
+- Diet is: {diet_type or 'any'}. If vegan: NO eggs, meat, dairy visible
+- Focus on what IS visible
+
+Dishes:
+{chr(10).join(dish_list)}
+
+Reply with ONLY numbered descriptions, one per line:
+1. [description]
+2. [description]
+..."""}]
+        )
+
+        lines = msg.content[0].text.strip().split('\n')
+        for i, r in enumerate(recipes):
+            rid = r.get("id", 0)
+            desc = ""
+            # Zeile für dieses Rezept finden
+            for line in lines:
+                line = line.strip()
+                if line.startswith(f"{i+1}.") or line.startswith(f"{i+1})"):
+                    desc = line.split(".", 1)[-1].strip() if "." in line else line
+                    break
+
+            if desc:
+                result[rid] = (
+                    f"Overhead food photography: {desc} "
+                    f"Complete dish on ceramic plate, wooden table, natural daylight, "
+                    f"warm tones, sharp focus, editorial food magazine, photorealistic"
+                )
+            else:
+                result[rid] = build_image_prompt_fallback(
+                    r.get("name",""), r.get("cuisine",""),
+                    r.get("ingredients",[]), r.get("description",""), diet_type
+                )
+
+        logger.info(f"Batch-Prompts für {len(result)} Rezepte generiert")
+        return result
+
+    except Exception as e:
+        logger.warning(f"Batch-Prompt fehlgeschlagen: {e}")
+        for r in recipes:
+            rid = r.get("id", 0)
+            result[rid] = build_image_prompt_fallback(
+                r.get("name",""), r.get("cuisine",""),
+                r.get("ingredients",[]), r.get("description",""), diet_type
+            )
+        return result
+
+
 def build_negative_prompt() -> str:
     """Negative Prompt für konsistente Qualität."""
     return (
         "illustration, cartoon, drawing, painting, sketch, digital art, "
         "3d render, fantasy, unrealistic, blurry, low quality, watermark, "
-        "text, logo, oversaturated, neon colors, plastic looking food"
+        "text, logo, oversaturated, neon colors, plastic looking food, "
+        "stock photo watermark, shutterstock, getty images, istock, adobe stock, "
+        "copyright text, credit text, website URL, photographer name, "
+        "hands, fingers, people, human, utensils in hand"
     )
 
 
@@ -334,74 +433,86 @@ def check_or_generate(
 
 
 # ─────────────────────────────────────────────
-# Zentrale Queue – ein Worker, sequentiell
+# ─────────────────────────────────────────────
+# Batch-Generierung – schnell & parallel
 # ─────────────────────────────────────────────
 
-_image_queue = Queue()
-_queued_ids = set()
-_worker_started = False
-_worker_lock = threading.Lock()
+_generating = set()  # IDs die gerade generiert werden
 
 
-def _worker():
-    """Einziger Worker-Thread – verarbeitet Bilder nacheinander."""
-    while True:
-        item = _image_queue.get()
-        try:
-            check_or_generate(
-                recipe_id=item["id"],
-                name=item["name"],
-                cuisine=item.get("cuisine", ""),
-                ingredients=item.get("ingredients", []),
-                description=item.get("description", ""),
-                diet_type=item.get("diet_type", ""),
-            )
-        except Exception as e:
-            logger.error(f"Worker Fehler für Rezept {item.get('id')}: {e}")
-        finally:
-            _queued_ids.discard(item.get("id"))
-            _image_queue.task_done()
-        time.sleep(5)  # 5s Pause → kein Rate Limit
-
-
-def _ensure_worker():
-    """Startet den Worker-Thread falls noch nicht laufend."""
-    global _worker_started
-    with _worker_lock:
-        if not _worker_started:
-            t = threading.Thread(target=_worker, daemon=True)
-            t.start()
-            _worker_started = True
-
-
-def enqueue(recipe_data: dict):
-    """Fügt ein Rezept zur Bildgenerierungs-Queue hinzu (dedupliziert)."""
-    rid = recipe_data.get("id")
-    if not rid or rid in _queued_ids or image_exists(rid):
+def _generate_single(recipe_id: int, prompt: str):
+    """Generiert ein einzelnes Bild mit fertigem Prompt."""
+    path = image_path(recipe_id)
+    if path.exists():
         return
-    if not _get_token():
-        return
-    _queued_ids.add(rid)
-    _image_queue.put(recipe_data)
-    _ensure_worker()
+
+    try:
+        negative = build_negative_prompt()
+        image_url = _call_replicate(prompt, negative)
+        if image_url:
+            _download_image(image_url, path)
+            logger.info(f"Bild gespeichert: {recipe_id}")
+    except Exception as e:
+        logger.error(f"Bild-Generierung fehlgeschlagen für {recipe_id}: {e}")
+    finally:
+        _generating.discard(recipe_id)
 
 
 def trigger_image_generation(recipes: list, diet_type: str = ""):
-    """Fügt alle Rezepte ohne Bild zur Queue hinzu."""
+    """Generiert Bilder für alle Rezepte ohne Bild.
+
+    1. Batch-Prompts via Claude (1 Call für alle)
+    2. 3 parallele Replicate-Calls
+    """
+    if not _get_token():
+        return
+
+    # Nur Rezepte ohne Bild und nicht bereits in Generierung
+    to_generate = []
     for r in recipes:
-        rid = r.get("id") if isinstance(r, dict) else r["id"]
-        if rid and not image_exists(rid):
+        rid = r.get("id") if isinstance(r, dict) else None
+        if rid and not image_exists(rid) and rid not in _generating:
             ings = r.get("ingredients", [])
             if isinstance(ings, str):
-                try:
-                    ings = json.loads(ings)
-                except Exception:
-                    ings = []
-            enqueue({
+                try: ings = json.loads(ings)
+                except: ings = []
+            to_generate.append({
                 "id": rid,
-                "name": r.get("name", "") if isinstance(r, dict) else r["name"],
-                "cuisine": r.get("cuisine", "") if isinstance(r, dict) else r["cuisine"],
-                "description": r.get("description", "") if isinstance(r, dict) else r.get("description", ""),
+                "name": r.get("name", ""),
+                "cuisine": r.get("cuisine", ""),
+                "description": r.get("description", ""),
                 "ingredients": ings,
-                "diet_type": diet_type,
             })
+
+    if not to_generate:
+        return
+
+    # Markieren als in Bearbeitung
+    for r in to_generate:
+        _generating.add(r["id"])
+
+    def _batch_worker():
+        # 1. Alle Prompts in einem Claude-Call
+        prompts = build_batch_prompts_with_claude(to_generate, diet_type)
+
+        # 2. Parallel generieren (max 3 gleichzeitig)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            for r in to_generate:
+                rid = r["id"]
+                prompt = prompts.get(rid, "")
+                if prompt:
+                    pool.submit(_generate_single, rid, prompt)
+
+    t = threading.Thread(target=_batch_worker, daemon=True)
+    t.start()
+
+
+def enqueue(recipe_data: dict):
+    """Einzelnes Rezept zur Generierung hinzufügen (Fallback)."""
+    rid = recipe_data.get("id")
+    if not rid or image_exists(rid) or rid in _generating:
+        return
+    if not _get_token():
+        return
+    trigger_image_generation([recipe_data], recipe_data.get("diet_type", ""))
