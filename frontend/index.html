@@ -2357,6 +2357,7 @@ async function loadSettings() {
     S.allergies           = JSON.parse(data.allergies || '[]');
     S.onboardingComplete  = data.onboarding_complete === 'true';
     S.nutritionFocus      = JSON.parse(data.nutrition_focus || '[]');
+    S.pantryItems         = JSON.parse(data.pantry_items || '[]');
 
     // Onboarding ZUERST prüfen – bevor Render-Fehler das blockieren
     if (!S.onboardingComplete) showOnboarding();
@@ -2414,7 +2415,7 @@ function esc(s) {
 // ─────────────────────────────────────────────
 // Onboarding Wizard
 // ─────────────────────────────────────────────
-const OB_STEPS = ['welcome','persons','diet','allergies','speed','health','nutrition_focus','cuisines','done'];
+const OB_STEPS = ['welcome','persons','diet','allergies','speed','health','nutrition_focus','cuisines','pantry','done'];
 
 const NUTRITION_FOCUS_OPTIONS = [
   { value: 'protein',  label: 'Proteinreich',       emoji: '💪', desc: 'Mind. 25g Protein pro Portion' },
@@ -2763,23 +2764,36 @@ function renderOnboarding() {
         </div>`;
       break;
 
-    case 'ingredients':
+    case 'pantry':
+      if (!S.pantryItems) S.pantryItems = [];
+      const PANTRY_SUGGESTIONS = [
+        'Olivenöl', 'Sojasauce', 'Reis', 'Nudeln', 'Mehl',
+        'Zucker', 'Essig', 'Senf', 'Tomatenmark', 'Kokosmilch',
+        'Haferflocken', 'Linsen', 'Kichererbsen', 'Kartoffeln', 'Zwiebeln',
+        'Knoblauch', 'Ingwer', 'Currypulver', 'Paprikapulver', 'Kreuzkümmel',
+      ];
       content = `
         <div class="ob-step">
-          <div class="ob-title">Lieblingszutaten?</div>
-          <div class="ob-subtitle">Zutaten die häufig vorkommen sollen. Optional – kannst du überspringen.</div>
-          <div class="tag-input-wrap" onclick="document.getElementById('ob-ing-input').focus()" style="text-align:left; margin-bottom:24px;">
-            <div id="ob-ing-tags">${S.preferredIngredients.map((ing, i) =>
-              `<span class="tag-item">${esc(ing)} <button class="tag-remove" onclick="event.stopPropagation(); S.preferredIngredients.splice(${i},1); renderOnboarding();">×</button></span>`
+          <div class="ob-title">Was hast du schon zu Hause?</div>
+          <div class="ob-subtitle">Diese Zutaten werden auf der Einkaufsliste automatisch ausgeblendet.</div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:16px;">
+            ${PANTRY_SUGGESTIONS.map(item => {
+              const active = S.pantryItems.includes(item);
+              return `<button class="ob-chip ${active ? 'selected' : ''}" onclick="obTogglePantry('${item}')">${item}</button>`;
+            }).join('')}
+          </div>
+          <div class="tag-input-wrap" onclick="document.getElementById('ob-pantry-input').focus()" style="text-align:left; margin-bottom:16px;">
+            <div id="ob-pantry-tags">${S.pantryItems.filter(i => !PANTRY_SUGGESTIONS.includes(i)).map((item, idx) =>
+              `<span class="tag-item">${esc(item)} <button class="tag-remove" onclick="event.stopPropagation(); S.pantryItems.splice(S.pantryItems.indexOf('${item}'),1); renderOnboarding();">×</button></span>`
             ).join('')}</div>
-            <input id="ob-ing-input" class="tag-input-field" placeholder="Zutat eingeben + Enter"
-                   onkeydown="obIngInput(event)" />
+            <input id="ob-pantry-input" class="tag-input-field" placeholder="Weitere Zutat eingeben + Enter"
+                   onkeydown="obPantryInput(event)" />
           </div>
           <div class="ob-nav">
             <button class="btn btn-ghost" onclick="obBack()">← Zurück</button>
             <button class="btn btn-primary" onclick="obNext()">Weiter →</button>
           </div>
-          <button class="ob-skip" onclick="S.preferredIngredients=[]; obNext()">Überspringen</button>
+          <button class="ob-skip" onclick="S.pantryItems=[]; obNext()">Überspringen</button>
         </div>`;
       break;
 
@@ -2792,8 +2806,8 @@ function renderOnboarding() {
       const cuisineTags = S.preferredCuisines.length
         ? S.preferredCuisines.map(c => `<span class="ob-tag">${CUISINE_EMOJIS[c] || ''} ${c}</span>`).join('')
         : '<span style="color:var(--gray-400)">Alle Küchen</span>';
-      const ingTags = S.preferredIngredients.length
-        ? S.preferredIngredients.map(i => `<span class="ob-tag">${i}</span>`).join('')
+      const pantryTags = (S.pantryItems || []).length
+        ? S.pantryItems.map(i => `<span class="ob-tag">${i}</span>`).join('')
         : '<span style="color:var(--gray-400)">Keine</span>';
       content = `
         <div class="ob-step">
@@ -2826,8 +2840,8 @@ function renderOnboarding() {
               <div class="ob-summary-value">${cuisineTags}</div>
             </div>
             <div class="ob-summary-card wide">
-              <div class="ob-summary-label">🥬 Lieblingszutaten</div>
-              <div class="ob-summary-value">${ingTags}</div>
+              <div class="ob-summary-label">🏠 Hab ich zu Hause</div>
+              <div class="ob-summary-value">${pantryTags}</div>
             </div>
           </div>
           <button class="btn btn-primary" style="width:100%; justify-content:center; font-size:16px; padding:16px 0;" onclick="finishOnboarding()">
@@ -2863,6 +2877,25 @@ function obToggleCuisine(c) {
   renderOnboarding();
 }
 
+function obTogglePantry(item) {
+  if (!S.pantryItems) S.pantryItems = [];
+  const idx = S.pantryItems.indexOf(item);
+  if (idx >= 0) S.pantryItems.splice(idx, 1);
+  else S.pantryItems.push(item);
+  renderOnboarding();
+}
+
+function obPantryInput(e) {
+  if (e.key !== 'Enter') return;
+  const val = e.target.value.trim();
+  if (!S.pantryItems) S.pantryItems = [];
+  if (val && !S.pantryItems.includes(val)) {
+    S.pantryItems.push(val);
+    renderOnboarding();
+  }
+  e.target.value = '';
+}
+
 function obToggleNutrition(val) {
   const idx = S.nutritionFocus.indexOf(val);
   if (idx >= 0) S.nutritionFocus.splice(idx, 1);
@@ -2891,6 +2924,7 @@ async function finishOnboarding() {
     health_comfort:        S.healthComfort,
     preferred_cuisines:    S.preferredCuisines,
     preferred_ingredients: S.preferredIngredients,
+    pantry_items:          S.pantryItems || [],
     nutrition_focus:       S.nutritionFocus,
     onboarding_complete:   "true",
   };

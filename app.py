@@ -456,6 +456,7 @@ def api_get_settings(request: Request):
             "persons": "2", "preferred_cuisines": "[]", "preferred_ingredients": "[]",
             "speed_refinement": "3", "health_comfort": "3", "diet_type": "alles",
             "allergies": "[]", "onboarding_complete": "false", "nutrition_focus": "[]",
+            "pantry_items": "[]",
         }
         for k, v in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (?, ?, ?)", (uid, k, v))
@@ -472,7 +473,7 @@ def api_update_settings(request: Request, payload: Dict[str, Any]):
     allowed = {
         "persons", "preferred_cuisines", "preferred_ingredients",
         "speed_refinement", "health_comfort",
-        "diet_type", "allergies", "onboarding_complete", "nutrition_focus",
+        "diet_type", "allergies", "onboarding_complete", "nutrition_focus", "pantry_items",
     }
     conn = get_db()
     c = conn.cursor()
