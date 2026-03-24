@@ -2766,27 +2766,15 @@ function renderOnboarding() {
 
     case 'pantry':
       if (!S.pantryItems) S.pantryItems = [];
-      const PANTRY_SUGGESTIONS = [
-        'Olivenöl', 'Sojasauce', 'Reis', 'Nudeln', 'Mehl',
-        'Zucker', 'Essig', 'Senf', 'Tomatenmark', 'Kokosmilch',
-        'Haferflocken', 'Linsen', 'Kichererbsen', 'Kartoffeln', 'Zwiebeln',
-        'Knoblauch', 'Ingwer', 'Currypulver', 'Paprikapulver', 'Kreuzkümmel',
-      ];
       content = `
         <div class="ob-step">
-          <div class="ob-title">Was hast du schon zu Hause?</div>
-          <div class="ob-subtitle">Diese Zutaten werden auf der Einkaufsliste automatisch ausgeblendet.</div>
-          <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:16px;">
-            ${PANTRY_SUGGESTIONS.map(item => {
-              const active = S.pantryItems.includes(item);
-              return `<button class="ob-chip ${active ? 'selected' : ''}" onclick="obTogglePantry('${item}')">${item}</button>`;
-            }).join('')}
-          </div>
+          <div class="ob-title">Was ist noch im Kühlschrank?</div>
+          <div class="ob-subtitle">Zutaten die du noch zu Hause hast – werden auf der Einkaufsliste ausgeblendet.</div>
           <div class="tag-input-wrap" onclick="document.getElementById('ob-pantry-input').focus()" style="text-align:left; margin-bottom:16px;">
-            <div id="ob-pantry-tags">${S.pantryItems.filter(i => !PANTRY_SUGGESTIONS.includes(i)).map((item, idx) =>
-              `<span class="tag-item">${esc(item)} <button class="tag-remove" onclick="event.stopPropagation(); S.pantryItems.splice(S.pantryItems.indexOf('${item}'),1); renderOnboarding();">×</button></span>`
+            <div id="ob-pantry-tags">${S.pantryItems.map((item, idx) =>
+              `<span class="tag-item">${esc(item)} <button class="tag-remove" onclick="event.stopPropagation(); S.pantryItems.splice(${idx},1); renderOnboarding();">×</button></span>`
             ).join('')}</div>
-            <input id="ob-pantry-input" class="tag-input-field" placeholder="Weitere Zutat eingeben + Enter"
+            <input id="ob-pantry-input" class="tag-input-field" placeholder="z.B. Paprika, Tofu, Champignons …"
                    onkeydown="obPantryInput(event)" />
           </div>
           <div class="ob-nav">
