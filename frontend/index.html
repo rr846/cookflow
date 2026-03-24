@@ -1794,17 +1794,32 @@ function renderRecipes() {
 let _availableImageIds = [];
 let _allImageUrls = [];  // Für Ladekreis: aktuelle + Archiv
 
+// Garantierte Food-Fotos von Unsplash als Fallback – laden IMMER
+const FALLBACK_FOOD_IMAGES = [
+  'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=400&fit=crop',
+  'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=400&h=400&fit=crop',
+  'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&h=400&fit=crop',
+  'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=400&h=400&fit=crop',
+  'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&h=400&fit=crop',
+  'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400&h=400&fit=crop',
+  'https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?w=400&h=400&fit=crop',
+  'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=400&h=400&fit=crop',
+];
+
 async function loadAvailableImages() {
   try {
     const res = await fetch('/api/images/available');
     const data = await res.json();
     _availableImageIds = data.ids || [];
-    // Alle Bilder für Ladekreis sammeln (aktuelle + Archiv)
     _allImageUrls = [
       ..._availableImageIds.map(id => `/api/images/${id}.jpg`),
       ...(data.archive || []),
     ];
   } catch (_) {}
+  // Fallback immer anhängen – damit der Ladekreis GARANTIERT Bilder hat
+  if (_allImageUrls.length < 3) {
+    _allImageUrls = [..._allImageUrls, ...FALLBACK_FOOD_IMAGES];
+  }
 }
 
 function updateHeroImage() {
@@ -2460,7 +2475,7 @@ async function showLoadingOverlay() {
     }, 500);
   }, 4000);
 
-  // Bilder für den Ladekreis immer frisch laden
+  // Bilder für den Ladekreis: eigene + Fallback-Fotos
   try {
     const imgRes = await fetch('/api/images/available');
     const imgData = await imgRes.json();
@@ -2471,32 +2486,12 @@ async function showLoadingOverlay() {
     ];
   } catch (_) {}
 
-  const existingImages = [..._allImageUrls];
-  if (existingImages.length === 0) {
-    // Fallback: Emoji im Kreis anzeigen wenn keine Bilder vorhanden
-    const fallbackEl = document.getElementById('load-img-0');
-    if (fallbackEl) {
-      fallbackEl.style.display = 'none';
-      const wrap = fallbackEl.parentElement;
-      let emojiEl = document.getElementById('load-emoji-fallback');
-      if (!emojiEl) {
-        emojiEl = document.createElement('div');
-        emojiEl.id = 'load-emoji-fallback';
-        emojiEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:64px;border-radius:50%;background:var(--green-dark-lt);';
-        wrap.appendChild(emojiEl);
-      }
-      const emojis = ['🍜','🥗','🍝','🥘','🍲','🍛'];
-      let ei = 0;
-      emojiEl.textContent = emojis[0];
-      _loadingImageInterval = setInterval(() => {
-        ei = (ei + 1) % emojis.length;
-        emojiEl.textContent = emojis[ei];
-      }, 2000);
-    }
-    return;
-  }
+  // IMMER Fallback-Bilder anhängen wenn zu wenige eigene vorhanden
+  const existingImages = _allImageUrls.length >= 3
+    ? [..._allImageUrls]
+    : [..._allImageUrls, ...FALLBACK_FOOD_IMAGES];
 
-  // Bilder vorher preloaden (max 3 Sek warten)
+  // Bilder preloaden (max 3s warten)
   const preloaded = [];
   const preloadPromises = existingImages.slice(0, 10).map(url => {
     return new Promise(resolve => {
@@ -2504,33 +2499,14 @@ async function showLoadingOverlay() {
       img.onload = () => { preloaded.push(url); resolve(); };
       img.onerror = () => resolve();
       img.src = url;
-      setTimeout(resolve, 3000); // Max 3s pro Bild warten
+      setTimeout(resolve, 3000);
     });
   });
   await Promise.all(preloadPromises);
 
+  // Wenn nichts geladen: Fallback-Bilder direkt verwenden (ohne Preload)
   if (preloaded.length === 0) {
-    // Emoji Fallback wenn gar kein Bild geladen werden konnte
-    const fallbackEl2 = document.getElementById('load-img-0');
-    if (fallbackEl2) {
-      fallbackEl2.style.display = 'none';
-      const wrap2 = fallbackEl2.parentElement;
-      let emojiEl2 = document.getElementById('load-emoji-fallback');
-      if (!emojiEl2) {
-        emojiEl2 = document.createElement('div');
-        emojiEl2.id = 'load-emoji-fallback';
-        emojiEl2.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:64px;border-radius:50%;background:var(--green-dark-lt);';
-        wrap2.appendChild(emojiEl2);
-      }
-      const emojis2 = ['🍜','🥗','🍝','🥘','🍲','🍛'];
-      let ei2 = 0;
-      emojiEl2.textContent = emojis2[0];
-      _loadingImageInterval = setInterval(() => {
-        ei2 = (ei2 + 1) % emojis2.length;
-        emojiEl2.textContent = emojis2[ei2];
-      }, 2000);
-    }
-    return;
+    preloaded.push(...FALLBACK_FOOD_IMAGES);
   }
 
   const imgs = [
