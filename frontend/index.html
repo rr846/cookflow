@@ -2769,7 +2769,7 @@ function renderOnboarding() {
       content = `
         <div class="ob-step">
           <div class="ob-title">Was ist noch im Kühlschrank?</div>
-          <div class="ob-subtitle">Zutaten die du noch zu Hause hast – werden auf der Einkaufsliste ausgeblendet.</div>
+          <div class="ob-subtitle">Cookflow baut bevorzugt Rezepte ein, die diese Zutaten verwenden.</div>
           <div class="tag-input-wrap" onclick="document.getElementById('ob-pantry-input').focus()" style="text-align:left; margin-bottom:16px;">
             <div id="ob-pantry-tags">${S.pantryItems.map((item, idx) =>
               `<span class="tag-item">${esc(item)} <button class="tag-remove" onclick="event.stopPropagation(); S.pantryItems.splice(${idx},1); renderOnboarding();">×</button></span>`

@@ -226,6 +226,7 @@ def generate_with_claude(
     diet_type:             str = "alles",
     allergies:             list = [],
     nutrition_focus:       list = [],
+    pantry_items:          list = [],
 ) -> list:
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -254,6 +255,14 @@ def generate_with_claude(
         ingredient_block = (
             f"\n🥬 Gewünschte Zutaten: {', '.join(preferred_ingredients)}. "
             "Diese Zutaten sollen wenn möglich in den Rezepten vorkommen."
+        )
+
+    pantry_block = ""
+    if pantry_items:
+        pantry_block = (
+            f"\n🏠 Im Kühlschrank vorhanden: {', '.join(pantry_items)}. "
+            "WICHTIG: Baue diese Zutaten bevorzugt in die Rezepte ein, damit sie verbraucht werden. "
+            "Mindestens die Hälfte der Rezepte sollte eine oder mehrere dieser Zutaten verwenden."
         )
 
     allergy_block = ""
@@ -333,7 +342,7 @@ Halte dich STRIKT an diese Zuordnungen. Jedes Rezept muss zur angegebenen Küche
 ⚙️ Präferenzen:
 - Aufwand/Raffinesse: {speed_text} ({speed_refinement}/5)
 - Gesundheit/Comfort: {health_text} ({health_comfort}/5)
-{exclusion_block}{cuisine_block}{ingredient_block}{allergy_block}{nutrition_block}
+{exclusion_block}{cuisine_block}{ingredient_block}{pantry_block}{allergy_block}{nutrition_block}
 
 Antworte AUSSCHLIESSLICH mit einem JSON-Array – kein Text davor oder danach.
 Format:
@@ -543,6 +552,7 @@ def api_generate_plan(request: Request):
     diet_type          = get_setting("diet_type", "alles", uid)
     allergies          = json.loads(get_setting("allergies", "[]", uid))
     nutrition_focus     = json.loads(get_setting("nutrition_focus", "[]", uid))
+    pantry_items        = json.loads(get_setting("pantry_items", "[]", uid))
 
     existing = c.execute(
         "SELECT * FROM weekly_plans WHERE week_start=? AND user_id=?", (week_start, uid)
@@ -620,6 +630,7 @@ def api_generate_plan(request: Request):
             diet_type=diet_type,
             allergies=allergies,
             nutrition_focus=nutrition_focus,
+            pantry_items=pantry_items,
         )
 
         new_recipes = []
