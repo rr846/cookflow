@@ -347,8 +347,7 @@ Halte dich STRIKT an diese Zuordnungen. Jedes Rezept muss zur angegebenen Küche
 {exclusion_block}{cuisine_block}{ingredient_block}{pantry_block}{allergy_block}{nutrition_block}
 
 Wochentag-Zuordnung:
-Verteile die Rezepte auf die Wochentage Montag bis Sonntag.
-Bei {count} Rezepten: Wochenendtage (Samstag, Sonntag) bevorzugt 2 Rezepte (Mittag + Abend), Werktage je 1 Rezept.
+Verteile die Rezepte auf die Wochentage Montag bis Sonntag – genau ein Rezept pro Tag.
 Gib für jedes Rezept den Wochentag im Feld "day" an.
 
 Antworte AUSSCHLIESSLICH mit einem JSON-Array – kein Text davor oder danach.
@@ -619,7 +618,7 @@ def api_generate_plan(request: Request):
 
     conn.close()
 
-    need = 10 - confirmed_count
+    need = 7 - confirmed_count
     if need <= 0:
         return api_get_plan(request)
 
