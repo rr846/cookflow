@@ -159,6 +159,7 @@ def init_db():
         ("favorite", "INTEGER", "0"),
         ("estimated_total", "REAL", "0"),
         ("nutrition", "TEXT", "'{}'"),
+        ("day", "TEXT", "''"),
     ]:
         try:
             c.execute(f"ALTER TABLE recipes ADD COLUMN {col} {coltype} DEFAULT {default}")
@@ -201,6 +202,7 @@ def row_to_recipe(r) -> Dict[str, Any]:
         "favorite":       bool(r["favorite"]) if "favorite" in r.keys() else False,
         "estimated_total": r["estimated_total"] if "estimated_total" in r.keys() else 0,
         "nutrition":      json.loads(r["nutrition"]) if "nutrition" in r.keys() and r["nutrition"] else {},
+        "day":            r["day"] if "day" in r.keys() else "",
     }
 
 
@@ -344,12 +346,18 @@ Halte dich STRIKT an diese Zuordnungen. Jedes Rezept muss zur angegebenen Küche
 - Gesundheit/Comfort: {health_text} ({health_comfort}/5)
 {exclusion_block}{cuisine_block}{ingredient_block}{pantry_block}{allergy_block}{nutrition_block}
 
+Wochentag-Zuordnung:
+Verteile die Rezepte auf die Wochentage Montag bis Sonntag.
+Bei {count} Rezepten: Wochenendtage (Samstag, Sonntag) bevorzugt 2 Rezepte (Mittag + Abend), Werktage je 1 Rezept.
+Gib für jedes Rezept den Wochentag im Feld "day" an.
+
 Antworte AUSSCHLIESSLICH mit einem JSON-Array – kein Text davor oder danach.
 Format:
 [
   {{
     "name": "Kreativer Rezeptname",
     "cuisine": "Küche",
+    "day": "Montag",
     "description": "Appetitanregende Beschreibung in 2–3 Sätzen.",
     "prep_time": 15,
     "cook_time": 25,
@@ -651,8 +659,8 @@ def api_generate_plan(request: Request):
     for r in new_recipes:
         c.execute("""
             INSERT INTO recipes
-                (plan_id, name, cuisine, description, prep_time, cook_time, servings, ingredients, steps, estimated_total, nutrition)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (plan_id, name, cuisine, description, prep_time, cook_time, servings, ingredients, steps, estimated_total, nutrition, day)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             plan_id,
             r["name"],
@@ -665,6 +673,7 @@ def api_generate_plan(request: Request):
             json.dumps(r.get("steps",        []), ensure_ascii=False),
             r.get("estimated_total", 0),
             json.dumps(r.get("nutrition", {}), ensure_ascii=False),
+            r.get("day", ""),
         ))
     conn.commit()
 

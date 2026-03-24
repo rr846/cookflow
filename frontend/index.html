@@ -4,33 +4,34 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Cookflow</title>
-  <link href="https://fonts.googleapis.com/css2?family=PT+Serif:wght@400;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;700;800&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:           #ffffff;
-      --bg-subtle:    #f5f5f0;
-      --orange:       #F04D23;
-      --orange-lt:    #fde8e2;
-      --green-dark:   #1B3D2F;
-      --green-dark-lt:#e6f0eb;
-      --lime:         #C8F53C;
-      --lime-dk:      #a8d028;
-      --yellow:       #F5C840;
+      --bg:           #FAF7F2;
+      --bg-subtle:    #F5F0E8;
+      --orange:       #C4653A;
+      --orange-lt:    #F5E6DC;
+      --green-dark:   #3D2B1F;
+      --green-dark-lt:#EDE7DF;
+      --lime:         #8B9E7E;
+      --lime-dk:      #6B7E5E;
+      --yellow:       #D4A574;
       --maroon:       #3A1628;
-      --black:        #0A0A0A;
-      --gray-100:     #f3f4f6;
-      --gray-400:     #9ca3af;
-      --gray-600:     #4b5563;
-      --font:         'PT Serif', serif;
+      --black:        #2C1810;
+      --gray-100:     #F5F0E8;
+      --gray-400:     #9E9488;
+      --gray-600:     #6B5E52;
+      --font:         'DM Sans', sans-serif;
+      --font-display: 'Playfair Display', serif;
       --radius-pill:  999px;
-      --radius-card:  20px;
+      --radius-card:  16px;
       --radius-sm:    12px;
     }
 
     body {
-      font-family: 'PT Serif', serif !important;
+      font-family: 'DM Sans', sans-serif;
       background: var(--bg-subtle);
       color: var(--black);
       height: 100vh;
@@ -58,8 +59,9 @@
     }
     .brand-logo { flex-shrink: 0; }
     .brand-name {
+      font-family: var(--font-display);
       font-size: 18px;
-      font-weight: 800;
+      font-weight: 700;
       color: var(--lime);
       letter-spacing: -0.3px;
     }
@@ -288,6 +290,19 @@
       gap: 20px;
     }
 
+    .day-group-label {
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--green-dark);
+      margin-top: 28px;
+      margin-bottom: 4px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #E8E0D8;
+      grid-column: 1 / -1;
+    }
+    .day-group-label:first-child { margin-top: 0; }
+
     .shopping-cta {
       display: flex;
       align-items: center;
@@ -302,22 +317,24 @@
     }
 
     .recipe-card {
-      background: var(--green-dark);
+      background: var(--bg);
       border-radius: var(--radius-card);
       overflow: hidden;
       cursor: pointer;
-      transition: transform 0.15s;
+      transition: transform 0.15s, box-shadow 0.15s;
       position: relative;
+      border: 1px solid #E8E0D8;
+      box-shadow: 0 2px 8px rgba(61,43,31,0.06);
     }
 
-    .recipe-card:hover { transform: translateY(-3px); }
+    .recipe-card:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(61,43,31,0.1); }
     .recipe-card.confirmed { outline: 3px solid var(--lime); }
 
     .recipe-img-wrap {
       width: 100%;
-      height: 180px;
+      height: 200px;
       overflow: hidden;
-      background: #2d5c44;
+      background: var(--bg-subtle);
       position: relative;
     }
 
@@ -335,8 +352,8 @@
       position: absolute;
       top: 8px; right: 8px;
       width: 18px; height: 18px;
-      border: 2px solid rgba(255,255,255,0.3);
-      border-top-color: #fff;
+      border: 2px solid rgba(61,43,31,0.2);
+      border-top-color: var(--orange);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
@@ -350,7 +367,7 @@
 
     .recipe-body {
       padding: 16px;
-      color: #fff;
+      color: var(--black);
     }
 
     .recipe-tags {
@@ -361,28 +378,28 @@
     }
 
     .tag {
-      padding: 3px 10px;
+      padding: 4px 10px;
       border-radius: var(--radius-pill);
       font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
+      font-weight: 600;
+      letter-spacing: 0.02em;
     }
 
-    .tag-cuisine { background: var(--yellow); color: var(--black); }
-    .tag-time    { background: rgba(0,0,0,0.45); color: #fff; }
-    .tag-lime    { background: var(--lime); color: var(--green-dark); }
+    .tag-cuisine { background: var(--orange-lt); color: var(--orange); }
+    .tag-time    { background: var(--bg-subtle); color: var(--gray-600); }
+    .tag-lime    { background: rgba(139,158,126,0.15); color: var(--lime-dk); }
 
     .recipe-name {
+      font-family: var(--font-display);
       font-size: 18px;
-      font-weight: 800;
+      font-weight: 700;
       margin-bottom: 6px;
       line-height: 1.25;
     }
 
     .recipe-desc {
       font-size: 13px;
-      color: rgba(255,255,255,0.65);
+      color: var(--gray-600);
       line-height: 1.5;
       display: -webkit-box;
       -webkit-line-clamp: 2;
@@ -396,7 +413,7 @@
       justify-content: space-between;
       margin-top: 14px;
       padding-top: 12px;
-      border-top: 1px solid rgba(255,255,255,0.12);
+      border-top: 1px solid #E8E0D8;
     }
 
     .confirm-toggle {
@@ -406,11 +423,11 @@
       cursor: pointer;
       font-size: 13px;
       font-weight: 600;
-      color: rgba(255,255,255,0.7);
+      color: var(--gray-600);
       transition: color 0.15s;
     }
 
-    .confirm-toggle.confirmed-state { color: var(--lime); }
+    .confirm-toggle.confirmed-state { color: var(--lime-dk); }
 
     .confirm-toggle input[type=checkbox] { display: none; }
 
@@ -418,7 +435,7 @@
       width: 22px;
       height: 22px;
       border-radius: 6px;
-      border: 2px solid rgba(255,255,255,0.3);
+      border: 2px solid var(--gray-400);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -429,13 +446,13 @@
     .confirm-toggle.confirmed-state .check-box {
       background: var(--lime);
       border-color: var(--lime);
-      color: var(--green-dark);
+      color: #fff;
     }
 
     .regen-btn {
-      background: rgba(255,255,255,0.1);
+      background: var(--bg-subtle);
       border: none;
-      color: rgba(255,255,255,0.6);
+      color: var(--gray-600);
       border-radius: var(--radius-pill);
       padding: 6px 12px;
       font-size: 12px;
@@ -445,7 +462,7 @@
       transition: all 0.15s;
     }
 
-    .regen-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+    .regen-btn:hover { background: #E8E0D8; color: var(--black); }
 
     /* ── Detail Panel ────────────────────────── */
     .detail-overlay {
@@ -505,6 +522,7 @@
     .detail-content { padding: 24px; }
 
     .detail-content h2 {
+      font-family: var(--font-display);
       font-size: 24px;
       font-weight: 800;
       margin-bottom: 8px;
@@ -628,8 +646,9 @@
     }
 
     .ob-title {
+      font-family: var(--font-display);
       font-size: 28px;
-      font-weight: 800;
+      font-weight: 700;
       margin-bottom: 8px;
       color: var(--black);
     }
@@ -1194,13 +1213,15 @@
     }
     .plan-hero-text { position: relative; z-index: 2; }
     .hero-logo {
+      font-family: var(--font-display);
       font-size: 42px;
-      font-weight: 800;
+      font-weight: 700;
       color: var(--lime);
       letter-spacing: -1px;
       margin-bottom: 12px;
     }
     .hero-headline {
+      font-family: var(--font-display);
       font-size: 32px;
       font-weight: 800;
       color: #fff;
@@ -1764,7 +1785,28 @@ function renderRecipes() {
     ? S.recipes.filter(r => r.cuisine === S.activeCuisineFilter)
     : S.recipes;
 
-  grid.innerHTML = filtered.map(r => recipeCardHTML(r)).join('');
+  // Nach Wochentagen gruppieren
+  const DAYS = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+  const hasAnyDay = filtered.some(r => r.day && DAYS.includes(r.day));
+
+  let html = '';
+  if (hasAnyDay) {
+    for (const day of DAYS) {
+      const dayRecipes = filtered.filter(r => r.day === day);
+      if (dayRecipes.length === 0) continue;
+      html += `<div class="day-group-label">${day}</div>`;
+      html += dayRecipes.map(r => recipeCardHTML(r)).join('');
+    }
+    // Rezepte ohne Tag (Kompatibilität)
+    const noDayRecipes = filtered.filter(r => !r.day || !DAYS.includes(r.day));
+    if (noDayRecipes.length > 0) {
+      html += noDayRecipes.map(r => recipeCardHTML(r)).join('');
+    }
+  } else {
+    html = filtered.map(r => recipeCardHTML(r)).join('');
+  }
+
+  grid.innerHTML = html;
 
   // Bilder laden – robust mit Retry
   filtered.forEach(r => loadRecipeImage(r.id));
