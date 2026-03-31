@@ -1028,16 +1028,19 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
             conn.close()
             logger.info(f"User saved: {email} ({google_sub[:8]}...)")
 
-            # Altes Cookie löschen (beide httponly Varianten) + neues setzen
-            response = RedirectResponse(url="/")
-            response.delete_cookie(COOKIE_NAME)
+            # Cookie setzen und redirect
+            response = RedirectResponse(url="/", status_code=302)
+            response.delete_cookie(COOKIE_NAME, path="/")
+            response.delete_cookie(COOKIE_NAME, path="/", httponly=False)
             response.set_cookie(
                 COOKIE_NAME, google_sub,
                 max_age=COOKIE_MAX_AGE,
                 httponly=True,
                 samesite="lax",
                 secure=APP_URL.startswith("https"),
+                path="/",
             )
+            logger.info(f"Cookie set for {email}: {google_sub[:8]}...")
             return response
         except Exception as e:
             logger.error(f"Auth callback error: {e}", exc_info=True)
@@ -1045,8 +1048,8 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
     @app.post("/auth/logout")
     async def auth_logout():
-        response = RedirectResponse(url="/")
-        response.delete_cookie(COOKIE_NAME)
+        response = RedirectResponse(url="/", status_code=302)
+        response.delete_cookie(COOKIE_NAME, path="/")
         return response
 
 
