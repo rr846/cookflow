@@ -2625,6 +2625,11 @@ function showOnboarding() {
   S.onboardingStep = 0;
   document.getElementById('onboarding-overlay').style.display = 'flex';
   renderOnboarding();
+  // Google Login Button einblenden nach Rendering
+  setTimeout(() => {
+    const gBtn = document.getElementById('google-login-btn');
+    if (gBtn) gBtn.style.display = 'flex';
+  }, 100);
 }
 
 function renderOnboarding() {
