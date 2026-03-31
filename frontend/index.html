@@ -3010,15 +3010,16 @@ async function loadUser() {
 }
 
 async function checkOAuthAvailable() {
-  // Teste ob /auth/login existiert (404 = nicht konfiguriert)
   try {
-    const res = await fetch('/auth/login', { method: 'HEAD', redirect: 'manual' });
-    // Wenn redirect (302) → OAuth ist konfiguriert
-    const available = res.status === 302 || res.type === 'opaqueredirect' || res.ok;
+    const res = await fetch('/api/me');
+    const data = await res.json();
+    // Wenn /api/me existiert, ist OAuth im Backend konfiguriert
+    // Prüfe ob has_cookie false ist (= nicht eingeloggt) → Login-Button zeigen
+    const available = data.has_cookie === false || data.logged_in === false;
     const gBtn = document.getElementById('google-login-btn');
-    if (gBtn) gBtn.style.display = available ? 'flex' : 'none';
+    if (gBtn) gBtn.style.display = 'flex';  // Immer zeigen wenn OAuth-Routes existieren
     const sBtn = document.getElementById('sidebar-login-btn');
-    if (sBtn) sBtn.style.display = available ? 'flex' : 'none';
+    if (sBtn) sBtn.style.display = 'flex';
   } catch (_) {}
 }
 
