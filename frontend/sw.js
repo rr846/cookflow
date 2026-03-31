@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cookflow-v1';
+const CACHE_NAME = 'cookflow-v2';
 const SHELL_URLS = [
   '/',
   '/manifest.json',
