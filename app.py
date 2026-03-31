@@ -461,32 +461,58 @@ COOKIE_NAME = "cookflow_uid"
 COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 Jahr
 
 
-class UserCookieMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+class UserCookieMiddleware:
+    """ASGI Middleware – setzt Cookie für anonyme User, lässt /auth/ in Ruhe."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        from starlette.requests import Request as _Req
+        request = _Req(scope, receive)
         uid = request.cookies.get(COOKIE_NAME)
-        new_cookie = False
-        if not uid:
-            uid = str(uuid.uuid4())[:12]
-            new_cookie = True
-        request.state.user_id = uid
-        response = await call_next(request)
-        if new_cookie:
-            response.set_cookie(
-                COOKIE_NAME, uid,
-                max_age=COOKIE_MAX_AGE,
-                httponly=True,
-                samesite="lax",
-                secure=APP_URL.startswith("https"),
-                path="/",
-            )
-        return response
+        is_auth_route = scope["path"].startswith("/auth/")
+
+        if uid:
+            scope.setdefault("state", {})["user_id"] = uid
+            return await self.app(scope, receive, send)
+
+        # Kein Cookie – neuen anonymen User erstellen (außer bei /auth/)
+        new_uid = str(uuid.uuid4())[:12]
+        scope.setdefault("state", {})["user_id"] = new_uid
+
+        if is_auth_route:
+            # Auth-Routes setzen ihr eigenes Cookie
+            return await self.app(scope, receive, send)
+
+        # Cookie in Response injizieren
+        async def send_with_cookie(message):
+            if message["type"] == "http.response.start":
+                from http.cookies import SimpleCookie
+                cookie = SimpleCookie()
+                cookie[COOKIE_NAME] = new_uid
+                cookie[COOKIE_NAME]["max-age"] = str(COOKIE_MAX_AGE)
+                cookie[COOKIE_NAME]["path"] = "/"
+                cookie[COOKIE_NAME]["samesite"] = "Lax"
+                cookie[COOKIE_NAME]["httponly"] = True
+                if APP_URL.startswith("https"):
+                    cookie[COOKIE_NAME]["secure"] = True
+                cookie_header = cookie[COOKIE_NAME].OutputString().encode("utf-8")
+                headers = list(message.get("headers", []))
+                headers.append((b"set-cookie", cookie_header))
+                message["headers"] = headers
+            await send(message)
+
+        return await self.app(scope, receive, send_with_cookie)
 
 
 app.add_middleware(UserCookieMiddleware)
 
 
 def get_uid(request: Request) -> str:
-    return getattr(request.state, "user_id", "default")
+    return request.scope.get("state", {}).get("user_id", request.cookies.get(COOKIE_NAME, "default"))
 
 
 # ─────────────────────────────────────────────
