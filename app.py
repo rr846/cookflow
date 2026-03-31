@@ -4,9 +4,10 @@ Easy Cook – FastAPI Backend (Neuaufbau)
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from typing import List, Dict, Any
 
 import sqlite3
@@ -20,6 +21,14 @@ import anthropic
 import image_service
 
 load_dotenv()
+
+# ─────────────────────────────────────────────
+# OAuth Konfiguration
+# ─────────────────────────────────────────────
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "cookflow-dev-secret-change-me")
+APP_URL = os.getenv("APP_URL", "http://localhost:8000")
 
 # ─────────────────────────────────────────────
 # System-Prompt
@@ -154,6 +163,17 @@ def init_db():
         )
     """)
 
+    # Users-Tabelle für Google OAuth
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id         TEXT PRIMARY KEY,
+            email      TEXT,
+            name       TEXT,
+            avatar_url TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Migrationen
     for col, coltype, default in [
         ("favorite", "INTEGER", "0"),
@@ -170,6 +190,13 @@ def init_db():
     # Migration: user_id zu weekly_plans hinzufügen
     try:
         c.execute("ALTER TABLE weekly_plans ADD COLUMN user_id TEXT DEFAULT 'default'")
+        conn.commit()
+    except Exception:
+        pass
+
+    # Migration: user_id zu recipe_archive hinzufügen
+    try:
+        c.execute("ALTER TABLE recipe_archive ADD COLUMN user_id TEXT DEFAULT 'default'")
         conn.commit()
     except Exception:
         pass
@@ -412,7 +439,10 @@ WICHTIG: Führe NIEMALS Wasser, Salz, Pfeffer oder Öl zum Braten als eigene Zut
 # FastAPI App
 # ─────────────────────────────────────────────
 
-app = FastAPI(title="Easy Cook")
+app = FastAPI(title="Cookflow")
+
+# SessionMiddleware für OAuth State (muss vor CORS)
+app.add_middleware(SessionMiddleware, secret_key=APP_SECRET_KEY)
 
 app.add_middleware(
     CORSMiddleware,
@@ -584,15 +614,15 @@ def api_generate_plan(request: Request):
             c.execute("""
                 INSERT INTO recipe_archive
                     (original_id, name, description, cuisine, prep_time, cook_time,
-                     servings, ingredients, steps, estimated_total, nutrition, image_filename)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     servings, ingredients, steps, estimated_total, nutrition, image_filename, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 old_r["id"], old_r["name"], old_r["description"], old_r["cuisine"],
                 old_r["prep_time"], old_r["cook_time"], old_r["servings"],
                 old_r["ingredients"], old_r["steps"],
                 old_r["estimated_total"] if "estimated_total" in old_r.keys() else 0,
                 old_r["nutrition"] if "nutrition" in old_r.keys() else "{}",
-                img_file,
+                img_file, uid,
             ))
 
         c.execute("DELETE FROM recipes WHERE plan_id=? AND status!='confirmed'", (plan_id,))
@@ -688,10 +718,23 @@ def api_generate_plan(request: Request):
     return api_get_plan(request)
 
 
+def _verify_recipe_ownership(conn, recipe_id: int, uid: str):
+    """Prüft ob ein Rezept dem User gehört (über weekly_plans)."""
+    return conn.execute("""
+        SELECT r.* FROM recipes r
+        JOIN weekly_plans wp ON r.plan_id = wp.id
+        WHERE r.id = ? AND wp.user_id = ?
+    """, (recipe_id, uid)).fetchone()
+
+
 @app.post("/api/recipes/{recipe_id}/confirm")
-def api_confirm_recipe(recipe_id: int):
+def api_confirm_recipe(request: Request, recipe_id: int):
+    uid = get_uid(request)
     conn = get_db()
     c = conn.cursor()
+    if not _verify_recipe_ownership(conn, recipe_id, uid):
+        conn.close()
+        raise HTTPException(status_code=404, detail="Rezept nicht gefunden")
     c.execute("UPDATE recipes SET status='confirmed' WHERE id=?", (recipe_id,))
     r = c.execute("SELECT plan_id FROM recipes WHERE id=?", (recipe_id,)).fetchone()
     if r:
@@ -706,9 +749,13 @@ def api_confirm_recipe(recipe_id: int):
 
 
 @app.post("/api/recipes/{recipe_id}/unconfirm")
-def api_unconfirm_recipe(recipe_id: int):
+def api_unconfirm_recipe(request: Request, recipe_id: int):
+    uid = get_uid(request)
     conn = get_db()
     c = conn.cursor()
+    if not _verify_recipe_ownership(conn, recipe_id, uid):
+        conn.close()
+        raise HTTPException(status_code=404, detail="Rezept nicht gefunden")
     c.execute("UPDATE recipes SET status='pending' WHERE id=?", (recipe_id,))
     r = c.execute("SELECT plan_id FROM recipes WHERE id=?", (recipe_id,)).fetchone()
     if r:
@@ -719,12 +766,13 @@ def api_unconfirm_recipe(recipe_id: int):
 
 
 @app.post("/api/recipes/{recipe_id}/favorite")
-def api_toggle_favorite(recipe_id: int):
+def api_toggle_favorite(request: Request, recipe_id: int):
+    uid = get_uid(request)
     conn = get_db()
-    recipe = conn.execute("SELECT favorite FROM recipes WHERE id=?", (recipe_id,)).fetchone()
-    if not recipe:
+    if not _verify_recipe_ownership(conn, recipe_id, uid):
         conn.close()
         raise HTTPException(status_code=404, detail="Rezept nicht gefunden")
+    recipe = conn.execute("SELECT favorite FROM recipes WHERE id=?", (recipe_id,)).fetchone()
     new_val = 0 if recipe["favorite"] else 1
     conn.execute("UPDATE recipes SET favorite=? WHERE id=?", (new_val, recipe_id))
     conn.commit()
@@ -765,15 +813,15 @@ def api_reset(request: Request):
             conn.execute("""
                 INSERT INTO recipe_archive
                     (original_id, name, description, cuisine, prep_time, cook_time,
-                     servings, ingredients, steps, estimated_total, nutrition, image_filename)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     servings, ingredients, steps, estimated_total, nutrition, image_filename, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 old_r["id"], old_r["name"], old_r["description"], old_r["cuisine"],
                 old_r["prep_time"], old_r["cook_time"], old_r["servings"],
                 old_r["ingredients"], old_r["steps"],
                 old_r["estimated_total"] if "estimated_total" in old_r.keys() else 0,
                 old_r["nutrition"] if "nutrition" in old_r.keys() else "{}",
-                img_file,
+                img_file, uid,
             ))
         # Bilder archivieren, Rezepte löschen
         image_service.archive_current_images(keep_ids=fav_ids)
@@ -784,13 +832,14 @@ def api_reset(request: Request):
     return {"ok": True}
 
 
-@app.get("/api/favorites")
 @app.get("/api/archive")
-def api_get_archive():
-    """Gibt alle archivierten Rezepte zurück."""
+def api_get_archive(request: Request):
+    """Gibt archivierte Rezepte des Users zurück."""
+    uid = get_uid(request)
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM recipe_archive ORDER BY archived_at DESC"
+        "SELECT * FROM recipe_archive WHERE user_id=? ORDER BY archived_at DESC",
+        (uid,)
     ).fetchall()
     conn.close()
     return {"recipes": [{
@@ -921,6 +970,82 @@ def api_get_ingredients(request: Request):
     return {"ingredients": list(agg.values())}
 
 
+
+
+# ─────────────────────────────────────────────
+# Google OAuth
+# ─────────────────────────────────────────────
+
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    from authlib.integrations.starlette_client import OAuth
+    oauth = OAuth()
+    oauth.register(
+        name="google",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
+
+    @app.get("/auth/login")
+    async def auth_login(request: Request):
+        redirect_uri = APP_URL.rstrip("/") + "/auth/callback"
+        return await oauth.google.authorize_redirect(request, redirect_uri)
+
+    @app.get("/auth/callback")
+    async def auth_callback(request: Request):
+        token = await oauth.google.authorize_access_token(request)
+        userinfo = token.get("userinfo", {})
+        if not userinfo:
+            raise HTTPException(status_code=400, detail="Google Login fehlgeschlagen")
+
+        google_sub = userinfo["sub"]
+        email = userinfo.get("email", "")
+        name = userinfo.get("name", "")
+        avatar = userinfo.get("picture", "")
+
+        # User in DB speichern/aktualisieren
+        conn = get_db()
+        conn.execute("""
+            INSERT OR REPLACE INTO users (id, email, name, avatar_url)
+            VALUES (?, ?, ?, ?)
+        """, (google_sub, email, name, avatar))
+        conn.commit()
+        conn.close()
+
+        # Cookie setzen mit Google Sub als User-ID
+        response = RedirectResponse(url="/")
+        response.set_cookie(
+            COOKIE_NAME, google_sub,
+            max_age=COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=APP_URL.startswith("https"),
+        )
+        return response
+
+    @app.post("/auth/logout")
+    async def auth_logout():
+        response = RedirectResponse(url="/")
+        response.delete_cookie(COOKIE_NAME)
+        return response
+
+
+@app.get("/api/me")
+def api_me(request: Request):
+    """Gibt den aktuellen User zurück (oder logged_in=false)."""
+    uid = get_uid(request)
+    conn = get_db()
+    user = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    conn.close()
+    if user:
+        return {
+            "logged_in": True,
+            "name": user["name"],
+            "email": user["email"],
+            "avatar": user["avatar_url"],
+        }
+    return {"logged_in": False, "has_cookie": uid != "default"}
 
 
 # ─────────────────────────────────────────────
