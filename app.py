@@ -319,6 +319,28 @@ def generate_with_claude(
     diet_clause = f" {diet_text}" if diet_text else ""
 
     import random
+    from datetime import datetime
+
+    # ── Saisonkalender (Deutschland) ──
+    SEASONAL = {
+        1:  {"gemüse": ["Grünkohl", "Rosenkohl", "Pastinaken", "Schwarzwurzel", "Feldsalat", "Lauch", "Rote Bete", "Wirsing"], "obst": ["Äpfel", "Birnen", "Zitrusfrüchte"]},
+        2:  {"gemüse": ["Grünkohl", "Rosenkohl", "Chicorée", "Lauch", "Feldsalat", "Pastinaken", "Schwarzwurzel"], "obst": ["Äpfel", "Birnen", "Zitrusfrüchte"]},
+        3:  {"gemüse": ["Spinat", "Bärlauch", "Lauch", "Chicorée", "Feldsalat", "Rote Bete", "Topinambur"], "obst": ["Rhabarber"]},
+        4:  {"gemüse": ["Spargel", "Spinat", "Bärlauch", "Radieschen", "Rucola", "Kohlrabi", "Frühlingszwiebeln"], "obst": ["Rhabarber", "Erdbeeren"]},
+        5:  {"gemüse": ["Spargel", "Kohlrabi", "Radieschen", "Spinat", "Mangold", "Fenchel", "Erbsen"], "obst": ["Erdbeeren", "Rhabarber", "Kirschen"]},
+        6:  {"gemüse": ["Zucchini", "Erbsen", "Bohnen", "Blumenkohl", "Brokkoli", "Gurke", "Tomaten"], "obst": ["Erdbeeren", "Kirschen", "Himbeeren", "Johannisbeeren"]},
+        7:  {"gemüse": ["Tomaten", "Zucchini", "Paprika", "Auberginen", "Bohnen", "Mais", "Mangold"], "obst": ["Heidelbeeren", "Himbeeren", "Kirschen", "Aprikosen", "Pfirsiche"]},
+        8:  {"gemüse": ["Tomaten", "Paprika", "Auberginen", "Zucchini", "Mais", "Bohnen", "Fenchel"], "obst": ["Pflaumen", "Brombeeren", "Heidelbeeren", "Pfirsiche", "Mirabellen"]},
+        9:  {"gemüse": ["Kürbis", "Pilze", "Rote Bete", "Fenchel", "Bohnen", "Mais", "Sellerie"], "obst": ["Äpfel", "Birnen", "Pflaumen", "Weintrauben", "Brombeeren"]},
+        10: {"gemüse": ["Kürbis", "Pilze", "Grünkohl", "Rosenkohl", "Rote Bete", "Sellerie", "Pastinaken"], "obst": ["Äpfel", "Birnen", "Quitten", "Weintrauben"]},
+        11: {"gemüse": ["Grünkohl", "Rosenkohl", "Kürbis", "Schwarzwurzel", "Pastinaken", "Topinambur", "Wirsing"], "obst": ["Äpfel", "Birnen", "Quitten"]},
+        12: {"gemüse": ["Grünkohl", "Rosenkohl", "Feldsalat", "Pastinaken", "Schwarzwurzel", "Lauch", "Wirsing"], "obst": ["Äpfel", "Birnen", "Zitrusfrüchte"]},
+    }
+
+    month = datetime.now().month
+    season = SEASONAL.get(month, SEASONAL[1])
+    seasonal_veg = ", ".join(season["gemüse"])
+    seasonal_fruit = ", ".join(season["obst"])
 
     # Pool an Gerichtstypen – pro Generierung werden zufällige gewählt
     DISH_TYPES = [
@@ -373,8 +395,15 @@ Halte dich STRIKT an diese Zuordnungen. Jedes Rezept muss zur angegebenen Küche
 - Gesundheit/Comfort: {health_text} ({health_comfort}/5)
 {exclusion_block}{cuisine_block}{ingredient_block}{pantry_block}{allergy_block}{nutrition_block}
 
+🌿 SAISONALE ZUTATEN (aktueller Monat):
+Saisonales Gemüse: {seasonal_veg}
+Saisonales Obst: {seasonal_fruit}
+PFLICHT: Mindestens 2 der {count} Rezepte MÜSSEN saisonales Gemüse oder Obst als Hauptzutat verwenden.
+Kennzeichne diese Rezepte in der Beschreibung kurz als saisonal.
+
 Wochentag-Zuordnung:
-Verteile die Rezepte auf die Wochentage Montag bis Sonntag – genau ein Rezept pro Tag.
+Verteile die Rezepte auf die Wochentage Montag bis Sonntag.
+Bei {count} Rezepten dürfen manche Tage zwei Rezepte haben, verteile gleichmäßig.
 Gib für jedes Rezept den Wochentag im Feld "day" an.
 
 Antworte AUSSCHLIESSLICH mit einem JSON-Array – kein Text davor oder danach.
@@ -685,7 +714,7 @@ def api_generate_plan(request: Request):
 
     conn.close()
 
-    need = 7 - confirmed_count
+    need = 10 - confirmed_count
     if need <= 0:
         return api_get_plan(request)
 
