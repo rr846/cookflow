@@ -994,35 +994,52 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
     @app.get("/auth/callback")
     async def auth_callback(request: Request):
-        token = await oauth.google.authorize_access_token(request)
-        userinfo = token.get("userinfo", {})
-        if not userinfo:
-            raise HTTPException(status_code=400, detail="Google Login fehlgeschlagen")
+        import logging
+        logger = logging.getLogger("cookflow.auth")
+        try:
+            token = await oauth.google.authorize_access_token(request)
+            logger.info(f"Token received, keys: {list(token.keys())}")
 
-        google_sub = userinfo["sub"]
-        email = userinfo.get("email", "")
-        name = userinfo.get("name", "")
-        avatar = userinfo.get("picture", "")
+            userinfo = token.get("userinfo", {})
+            if not userinfo:
+                # Fallback: try to get userinfo from id_token
+                userinfo = token.get("id_token", {})
+                if not userinfo:
+                    logger.error(f"No userinfo in token: {token}")
+                    return RedirectResponse(url="/?auth_error=no_userinfo")
 
-        # User in DB speichern/aktualisieren
-        conn = get_db()
-        conn.execute("""
-            INSERT OR REPLACE INTO users (id, email, name, avatar_url)
-            VALUES (?, ?, ?, ?)
-        """, (google_sub, email, name, avatar))
-        conn.commit()
-        conn.close()
+            google_sub = userinfo.get("sub", "")
+            email = userinfo.get("email", "")
+            name = userinfo.get("name", "")
+            avatar = userinfo.get("picture", "")
 
-        # Cookie setzen mit Google Sub als User-ID
-        response = RedirectResponse(url="/")
-        response.set_cookie(
-            COOKIE_NAME, google_sub,
-            max_age=COOKIE_MAX_AGE,
-            httponly=True,
-            samesite="lax",
-            secure=APP_URL.startswith("https"),
-        )
-        return response
+            if not google_sub:
+                logger.error(f"No sub in userinfo: {userinfo}")
+                return RedirectResponse(url="/?auth_error=no_sub")
+
+            # User in DB speichern/aktualisieren
+            conn = get_db()
+            conn.execute("""
+                INSERT OR REPLACE INTO users (id, email, name, avatar_url)
+                VALUES (?, ?, ?, ?)
+            """, (google_sub, email, name, avatar))
+            conn.commit()
+            conn.close()
+            logger.info(f"User saved: {email} ({google_sub[:8]}...)")
+
+            # Cookie setzen mit Google Sub als User-ID
+            response = RedirectResponse(url="/")
+            response.set_cookie(
+                COOKIE_NAME, google_sub,
+                max_age=COOKIE_MAX_AGE,
+                httponly=True,
+                samesite="lax",
+                secure=APP_URL.startswith("https"),
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Auth callback error: {e}", exc_info=True)
+            return RedirectResponse(url=f"/?auth_error={str(e)[:100]}")
 
     @app.post("/auth/logout")
     async def auth_logout():
