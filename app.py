@@ -1027,7 +1027,7 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
     @app.get("/auth/login")
     async def auth_login(request: Request):
         redirect_uri = APP_URL.rstrip("/") + "/auth/callback"
-        return await oauth.google.authorize_redirect(request, redirect_uri)
+        return await oauth.google.authorize_redirect(request, redirect_uri, prompt="select_account")
 
     @app.get("/auth/callback")
     async def auth_callback(request: Request):
