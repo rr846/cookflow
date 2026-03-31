@@ -477,6 +477,7 @@ class UserCookieMiddleware(BaseHTTPMiddleware):
                 httponly=True,
                 samesite="lax",
                 secure=APP_URL.startswith("https"),
+                path="/",
             )
         return response
 
@@ -1028,10 +1029,8 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
             conn.close()
             logger.info(f"User saved: {email} ({google_sub[:8]}...)")
 
-            # Cookie setzen und redirect
+            # Cookie setzen und redirect (kein delete_cookie – set_cookie überschreibt direkt)
             response = RedirectResponse(url="/", status_code=302)
-            response.delete_cookie(COOKIE_NAME, path="/")
-            response.delete_cookie(COOKIE_NAME, path="/", httponly=False)
             response.set_cookie(
                 COOKIE_NAME, google_sub,
                 max_age=COOKIE_MAX_AGE,
