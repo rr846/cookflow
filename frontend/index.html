@@ -2436,8 +2436,24 @@ async function loadSettings() {
     S.nutritionFocus      = JSON.parse(data.nutrition_focus || '[]');
     S.pantryItems         = JSON.parse(data.pantry_items || '[]');
 
-    // Onboarding ZUERST prüfen – bevor Render-Fehler das blockieren
-    if (!S.onboardingComplete) showOnboarding();
+    // Onboarding prüfen
+    if (!S.onboardingComplete) {
+      // Prüfe ob User bereits eingeloggt ist (Google Login abgeschlossen)
+      try {
+        const meRes = await fetch('/api/me');
+        const meData = await meRes.json();
+        if (meData.logged_in) {
+          // Eingeloggt → Welcome überspringen, direkt zu Schritt 2
+          S.onboardingStep = 1;  // Skip welcome
+          document.getElementById('onboarding-overlay').style.display = 'flex';
+          renderOnboarding();
+        } else {
+          showOnboarding();  // Nicht eingeloggt → normales Onboarding mit Welcome
+        }
+      } catch (_) {
+        showOnboarding();
+      }
+    }
 
     document.getElementById('s-persons').value = S.persons;
     document.getElementById('s-speed').value   = S.speedRefinement;
