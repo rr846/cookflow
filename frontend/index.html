@@ -2438,19 +2438,12 @@ async function loadSettings() {
 
     // Onboarding prüfen
     if (!S.onboardingComplete) {
-      // Prüfe ob User bereits eingeloggt ist (Google Login abgeschlossen)
-      try {
-        const meRes = await fetch('/api/me');
-        const meData = await meRes.json();
-        if (meData.logged_in) {
-          // Eingeloggt → Welcome überspringen, direkt zu Schritt 2
-          S.onboardingStep = 1;  // Skip welcome
-          document.getElementById('onboarding-overlay').style.display = 'flex';
-          renderOnboarding();
-        } else {
-          showOnboarding();  // Nicht eingeloggt → normales Onboarding mit Welcome
-        }
-      } catch (_) {
+      if (isLoggedIn()) {
+        // Eingeloggt → Welcome überspringen, direkt zu Schritt 2
+        S.onboardingStep = 1;
+        document.getElementById('onboarding-overlay').style.display = 'flex';
+        renderOnboarding();
+      } else {
         showOnboarding();
       }
     }
@@ -2996,52 +2989,74 @@ async function finishOnboarding() {
 // Init
 // ─────────────────────────────────────────────
 // ─────────────────────────────────────────────
-// User / Auth
+// Auth – Token-basiert via localStorage
 // ─────────────────────────────────────────────
-async function loadUser() {
-  try {
-    const res = await fetch('/api/me');
-    const data = await res.json();
-    const userSection = document.getElementById('sidebar-user');
-    if (!userSection) return;
 
-    if (data.logged_in) {
-      userSection.innerHTML = `
-        <div style="display:flex; align-items:center; gap:10px; padding:10px 14px;">
-          <img src="${data.avatar}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;" onerror="this.style.display='none'" />
-          <div style="flex:1; min-width:0;">
-            <div style="font-size:13px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${data.name || data.email}</div>
-          </div>
-        </div>
-        <button class="nav-btn" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())" style="font-size:12px; color:var(--gray-400);">
-          <span class="nav-icon">⎋</span> Abmelden
-        </button>`;
-      // Google Login Button im Onboarding ausblenden
-      const gBtn = document.getElementById('google-login-btn');
-      if (gBtn) gBtn.style.display = 'none';
+// Auth-Token aus URL-Parametern lesen (nach Google Login Redirect)
+(function checkAuthRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('auth_token')) {
+    localStorage.setItem('cookflow_token', params.get('auth_token'));
+    localStorage.setItem('cookflow_name', params.get('auth_name') || '');
+    localStorage.setItem('cookflow_email', params.get('auth_email') || '');
+    localStorage.setItem('cookflow_avatar', params.get('auth_avatar') || '');
+    // URL aufräumen (Parameter entfernen)
+    window.history.replaceState({}, '', '/');
+  }
+})();
+
+// Globaler Auth-Header für alle fetch-Calls
+const _originalFetch = window.fetch;
+window.fetch = function(url, opts = {}) {
+  const token = localStorage.getItem('cookflow_token');
+  if (token && typeof url === 'string' && url.startsWith('/api/')) {
+    opts.headers = opts.headers || {};
+    if (opts.headers instanceof Headers) {
+      opts.headers.set('X-Auth-Token', token);
     } else {
-      userSection.innerHTML = `
-        <a href="/auth/login" class="nav-btn" id="sidebar-login-btn" style="text-decoration:none; display:none;">
-          <span class="nav-icon">→</span> Anmelden
-        </a>`;
-      // Prüfe ob Google OAuth konfiguriert ist
-      checkOAuthAvailable();
+      opts.headers['X-Auth-Token'] = token;
     }
-  } catch (_) {}
+  }
+  return _originalFetch.call(this, url, opts);
+};
+
+function isLoggedIn() {
+  return !!localStorage.getItem('cookflow_token');
 }
 
-async function checkOAuthAvailable() {
-  try {
-    const res = await fetch('/api/me');
-    const data = await res.json();
-    // Wenn /api/me existiert, ist OAuth im Backend konfiguriert
-    // Prüfe ob has_cookie false ist (= nicht eingeloggt) → Login-Button zeigen
-    const available = data.has_cookie === false || data.logged_in === false;
-    const gBtn = document.getElementById('google-login-btn');
-    if (gBtn) gBtn.style.display = 'flex';  // Immer zeigen wenn OAuth-Routes existieren
-    const sBtn = document.getElementById('sidebar-login-btn');
-    if (sBtn) sBtn.style.display = 'flex';
-  } catch (_) {}
+function loadUser() {
+  const userSection = document.getElementById('sidebar-user');
+  if (!userSection) return;
+
+  const name = localStorage.getItem('cookflow_name');
+  const email = localStorage.getItem('cookflow_email');
+  const avatar = localStorage.getItem('cookflow_avatar');
+
+  if (isLoggedIn() && (name || email)) {
+    userSection.innerHTML = `
+      <div style="display:flex; align-items:center; gap:10px; padding:10px 14px;">
+        ${avatar ? `<img src="${avatar}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;" onerror="this.style.display='none'" />` : ''}
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${name || email}</div>
+        </div>
+      </div>
+      <button class="nav-btn" onclick="logoutUser()" style="font-size:12px; color:var(--gray-400);">
+        <span class="nav-icon">⎋</span> Abmelden
+      </button>`;
+  } else {
+    userSection.innerHTML = `
+      <a href="/auth/login" class="nav-btn" style="text-decoration:none;">
+        <span class="nav-icon">→</span> Anmelden
+      </a>`;
+  }
+}
+
+function logoutUser() {
+  localStorage.removeItem('cookflow_token');
+  localStorage.removeItem('cookflow_name');
+  localStorage.removeItem('cookflow_email');
+  localStorage.removeItem('cookflow_avatar');
+  location.reload();
 }
 
 // Service Worker für PWA

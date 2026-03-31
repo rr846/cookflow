@@ -512,7 +512,16 @@ app.add_middleware(UserCookieMiddleware)
 
 
 def get_uid(request: Request) -> str:
-    return request.scope.get("state", {}).get("user_id", request.cookies.get(COOKIE_NAME, "default"))
+    # 1. X-Auth-Token Header (localStorage-basiert)
+    token = request.headers.get("x-auth-token", "")
+    if token:
+        return token
+    # 2. Cookie (anonyme User)
+    uid = request.cookies.get(COOKIE_NAME, "")
+    if uid:
+        return uid
+    # 3. Scope state (von Middleware gesetzt)
+    return request.scope.get("state", {}).get("user_id", "default")
 
 
 # ─────────────────────────────────────────────
@@ -1055,21 +1064,16 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
             conn.close()
             logger.info(f"User saved: {email} ({google_sub[:8]}...)")
 
-            # Cookie setzen und redirect (kein delete_cookie – set_cookie überschreibt direkt)
-            response = RedirectResponse(url="/", status_code=302)
-            response.set_cookie(
-                COOKIE_NAME, google_sub,
-                max_age=COOKIE_MAX_AGE,
-                httponly=True,
-                samesite="lax",
-                secure=APP_URL.startswith("https"),
-                path="/",
+            # Token als URL-Fragment mitgeben – Frontend speichert in localStorage
+            import urllib.parse
+            logger.info(f"Login OK for {email} ({google_sub[:8]}...)")
+            return RedirectResponse(
+                url=f"/?auth_token={urllib.parse.quote(google_sub)}&auth_name={urllib.parse.quote(name)}&auth_email={urllib.parse.quote(email)}&auth_avatar={urllib.parse.quote(avatar)}",
+                status_code=302,
             )
-            logger.info(f"Cookie set for {email}: {google_sub[:8]}...")
-            return response
         except Exception as e:
             logger.error(f"Auth callback error: {e}", exc_info=True)
-            return RedirectResponse(url=f"/?auth_error={str(e)[:100]}")
+            return RedirectResponse(url=f"/?auth_error={urllib.parse.quote(str(e)[:100])}", status_code=302)
 
     @app.post("/auth/logout")
     async def auth_logout():
