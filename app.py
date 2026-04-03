@@ -19,6 +19,7 @@ from datetime import date, timedelta
 from dotenv import load_dotenv
 import anthropic
 import image_service
+import recipe_research
 
 load_dotenv()
 
@@ -160,6 +161,22 @@ def init_db():
             nutrition       TEXT    DEFAULT '{}',
             image_filename  TEXT    DEFAULT '',
             archived_at     TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Rezept-Inspirationen – wachsende Datenbank aus Web-Recherche
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS recipe_inspirations (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT    NOT NULL,
+            description TEXT,
+            cuisine     TEXT    DEFAULT '',
+            season      TEXT    DEFAULT '',
+            tags        TEXT    DEFAULT '[]',
+            ingredients TEXT    DEFAULT '[]',
+            source      TEXT    DEFAULT '',
+            quality     INTEGER DEFAULT 3,
+            created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -383,6 +400,28 @@ def generate_with_claude(
         for i in range(count)
     )
 
+    # Inspirationen aus der Datenbank laden
+    inspiration_block = ""
+    try:
+        insps = recipe_research.get_relevant_inspirations(
+            cuisines=preferred_cuisines or None,
+            season=recipe_research.get_current_season(),
+            limit=15,
+        )
+        if insps:
+            insp_texts = []
+            for inp in insps[:15]:
+                ings = json.loads(inp.get("ingredients", "[]")) if isinstance(inp.get("ingredients"), str) else inp.get("ingredients", [])
+                ing_str = ", ".join(ings[:4]) if ings else ""
+                insp_texts.append(f"- {inp['name']} ({inp.get('cuisine','')}) – {inp.get('description','')} [{ing_str}]")
+            inspiration_block = (
+                "\n\n💡 KREATIVE INSPIRATIONEN aus unserer Rezeptdatenbank (nutze als Anregung, kopiere NICHT direkt):\n"
+                + "\n".join(insp_texts)
+                + "\nLass dich von diesen Ideen inspirieren, aber erstelle EIGENE, NEUE Rezepte mit eigenem Twist."
+            )
+    except Exception:
+        pass  # Keine Inspirationen verfügbar – kein Problem
+
     prompt = f"""Erstelle exakt {count}{diet_clause} Rezepte für {persons} Personen.
 
 🎲 PFLICHT-VORGABEN für jedes Rezept (Küche + Gerichtstyp):
@@ -393,7 +432,7 @@ Halte dich STRIKT an diese Zuordnungen. Jedes Rezept muss zur angegebenen Küche
 ⚙️ Präferenzen:
 - Aufwand/Raffinesse: {speed_text} ({speed_refinement}/5)
 - Gesundheit/Comfort: {health_text} ({health_comfort}/5)
-{exclusion_block}{cuisine_block}{ingredient_block}{pantry_block}{allergy_block}{nutrition_block}
+{exclusion_block}{cuisine_block}{ingredient_block}{pantry_block}{allergy_block}{nutrition_block}{inspiration_block}
 
 🌿 SAISONALE ZUTATEN (aktueller Monat):
 Saisonales Gemüse: {seasonal_veg}
@@ -1126,6 +1165,44 @@ def api_me(request: Request):
             "avatar": user["avatar_url"],
         }
     return {"logged_in": False, "has_cookie": uid != "default"}
+
+
+# ─────────────────────────────────────────────
+# Rezept-Recherche & Inspirationen
+# ─────────────────────────────────────────────
+
+@app.post("/api/research/run")
+def api_run_research():
+    """Führt eine Recherche-Runde durch und speichert neue Inspirationen."""
+    import threading
+    def _run():
+        result = recipe_research.run_research_round()
+        logger.info(f"Recherche abgeschlossen: {result}")
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return {"ok": True, "message": "Recherche gestartet im Hintergrund"}
+
+
+@app.get("/api/research/status")
+def api_research_status():
+    """Zeigt den aktuellen Stand der Inspirations-Datenbank."""
+    count = recipe_research.get_inspiration_count()
+    season = recipe_research.get_current_season()
+    seasonal_ings = recipe_research.get_seasonal_ingredients()
+    return {
+        "total_inspirations": count,
+        "current_season": season,
+        "seasonal_ingredients": seasonal_ings,
+    }
+
+
+@app.get("/api/research/inspirations")
+def api_get_inspirations(cuisine: str = "", limit: int = 20):
+    """Gibt relevante Inspirationen aus der DB zurück."""
+    cuisines = [cuisine] if cuisine else None
+    season = recipe_research.get_current_season()
+    insps = recipe_research.get_relevant_inspirations(cuisines=cuisines, season=season, limit=limit)
+    return {"inspirations": insps, "count": len(insps)}
 
 
 # ─────────────────────────────────────────────
