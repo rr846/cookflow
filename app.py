@@ -1344,6 +1344,45 @@ app.mount("/", StaticFiles(directory="frontend", html=True), name="static")
 
 init_db()
 
+
+# ─────────────────────────────────────────────
+# Wöchentliche Recherche (Hintergrund-Timer)
+# ─────────────────────────────────────────────
+import threading
+import time as _time
+
+def _weekly_research_loop():
+    """Läuft im Hintergrund und startet montags um 6:00 eine Recherche-Runde."""
+    while True:
+        try:
+            now = datetime.now()
+            # Prüfe ob Montag und ob schon eine Recherche diese Woche lief
+            if now.weekday() == 0 and now.hour >= 6:
+                conn = get_db()
+                week_start = current_week_start()
+                existing = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM recipe_inspirations WHERE created_at >= ?",
+                    (week_start,)
+                ).fetchone()["cnt"]
+                conn.close()
+
+                if existing == 0:
+                    logger.info("Wöchentliche Recherche gestartet...")
+                    recipe_research.run_research_round()
+                    # Zweite Runde mit anderen Küchen
+                    import random as _rnd
+                    all_c = ["Japanisch", "Koreanisch", "Vietnamesisch", "Persisch",
+                             "Französisch", "Spanisch", "Türkisch", "Äthiopisch"]
+                    recipe_research.run_research_round(cuisines=_rnd.sample(all_c, 6))
+        except Exception as e:
+            logger.error(f"Recherche-Timer Fehler: {e}")
+
+        _time.sleep(3600)  # Jede Stunde prüfen
+
+_research_thread = threading.Thread(target=_weekly_research_loop, daemon=True)
+_research_thread.start()
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
