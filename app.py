@@ -422,7 +422,19 @@ def generate_with_claude(
     except Exception:
         pass  # Keine Inspirationen verfügbar – kein Problem
 
+    # Diät-Hinweis als harten Constraint formulieren
+    diet_constraint = ""
+    if diet_type and diet_type != "alles":
+        diet_map = {
+            "vegan": "ALLE Rezepte MÜSSEN 100% VEGAN sein. KEINE tierischen Produkte: kein Fleisch, kein Fisch, keine Milch, kein Käse, keine Eier, kein Honig, keine Butter, keine Sahne, kein Joghurt. Verwende ausschließlich pflanzliche Alternativen.",
+            "vegetarisch": "ALLE Rezepte MÜSSEN VEGETARISCH sein. KEIN Fleisch, kein Fisch, keine Meeresfrüchte. Milchprodukte und Eier sind erlaubt.",
+            "pescetarisch": "ALLE Rezepte MÜSSEN PESCETARISCH sein. KEIN Fleisch. Fisch, Meeresfrüchte, Milchprodukte und Eier sind erlaubt.",
+            "flexitarisch": "Die Rezepte sollen ÜBERWIEGEND PFLANZLICH sein. Maximal 1-2 Rezepte dürfen Fleisch oder Fisch enthalten.",
+        }
+        diet_constraint = f"\n\n🚨 ERNÄHRUNG (KRITISCHE REGEL – MUSS EINGEHALTEN WERDEN):\n{diet_map.get(diet_type, '')}"
+
     prompt = f"""Erstelle exakt {count}{diet_clause} Rezepte für {persons} Personen.
+{diet_constraint}
 
 🎲 PFLICHT-VORGABEN für jedes Rezept (Küche + Gerichtstyp):
 {assignments}
