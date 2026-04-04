@@ -475,11 +475,9 @@ Halte dich STRIKT an diese Zuordnungen. Jedes Rezept muss zur angegebenen Küche
 - Gesundheit/Comfort: {health_text} ({health_comfort}/5)
 {exclusion_block}{cuisine_block}{ingredient_block}{pantry_block}{allergy_block}{nutrition_block}{inspiration_block}
 
-🌿 SAISONALE ZUTATEN (aktueller Monat):
-Saisonales Gemüse: {seasonal_veg}
-Saisonales Obst: {seasonal_fruit}
-PFLICHT: Mindestens 2 der {count} Rezepte MÜSSEN saisonales Gemüse oder Obst als Hauptzutat verwenden.
-Kennzeichne diese Rezepte in der Beschreibung kurz als saisonal.
+🚫 KEINE FUSION-GERICHTE:
+Erstelle AUTHENTISCHE Rezepte die zur jeweiligen Küche passen. Keine erzwungenen Kombinationen aus verschiedenen Küchen.
+Ein japanisches Gericht soll japanisch schmecken, ein mexikanisches mexikanisch. Keine "Kimchi-Pasta" oder "Miso-Tacos" – es sei denn diese Kombination ist tatsächlich etabliert und lecker.
 
 Wochentag-Zuordnung:
 Verteile die Rezepte auf die Wochentage Montag bis Sonntag.
