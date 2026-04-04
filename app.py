@@ -219,6 +219,35 @@ def init_db():
         pass
 
     conn.commit()
+
+    # Seed-Daten laden falls Inspirations-Tabelle leer
+    count = conn.execute("SELECT COUNT(*) as cnt FROM recipe_inspirations").fetchone()["cnt"]
+    if count == 0:
+        seed_path = Path(__file__).parent / "seed_inspirations.json"
+        if seed_path.exists():
+            try:
+                import json as _json
+                seeds = _json.loads(seed_path.read_text())
+                for s in seeds:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO recipe_inspirations
+                            (name, description, cuisine, season, tags, ingredients, source, quality)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        s.get("name", ""),
+                        s.get("description", ""),
+                        s.get("cuisine", ""),
+                        s.get("season", ""),
+                        s.get("tags", "[]"),
+                        s.get("ingredients", "[]"),
+                        s.get("source", ""),
+                        s.get("quality", 3),
+                    ))
+                conn.commit()
+                logger.info(f"Seed: {len(seeds)} Inspirationen geladen")
+            except Exception as e:
+                logger.warning(f"Seed-Import fehlgeschlagen: {e}")
+
     conn.close()
 
 
@@ -1215,6 +1244,71 @@ def api_get_inspirations(cuisine: str = "", limit: int = 20):
     season = recipe_research.get_current_season()
     insps = recipe_research.get_relevant_inspirations(cuisines=cuisines, season=season, limit=limit)
     return {"inspirations": insps, "count": len(insps)}
+
+
+@app.get("/api/loading-messages")
+def api_loading_messages():
+    """Generiert personalisierte Ladetexte basierend auf Nutzer-Präferenzen."""
+    uid = _get_uid()
+    name_raw = ""
+
+    # Name aus Google-Login holen
+    if uid != "default":
+        conn = get_db()
+        user = conn.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone()
+        conn.close()
+        if user and user["name"]:
+            name_raw = user["name"].split(" ")[0]  # Vorname
+
+    diet = get_setting("diet_type", "alles", uid)
+    cuisines = json.loads(get_setting("preferred_cuisines", "[]", uid))
+    speed = int(get_setting("speed_refinement", "3", uid))
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {"messages": []}
+
+    # Kontext für Claude
+    name_hint = f"Der Nutzer heißt {name_raw}. Sprich ihn mit Vornamen an." if name_raw else "Der Nutzer ist nicht eingeloggt. Sprich ihn mit 'du' an."
+    diet_hint = f"Ernährung: {diet}" if diet != "alles" else ""
+    cuisine_hint = f"Lieblingsküchen: {', '.join(cuisines)}" if cuisines else ""
+    speed_hint = "mag es schnell und einfach" if speed <= 2 else "mag es raffiniert" if speed >= 4 else ""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=600,
+            messages=[{"role": "user", "content": f"""Schreibe genau 7 kurze, charmante Wartesätze für eine Koch-App.
+Der Nutzer wartet gerade darauf, dass sein Wochenplan mit Rezepten generiert wird.
+
+{name_hint}
+{diet_hint}
+{cuisine_hint}
+{speed_hint}
+
+REGELN:
+- Jeder Satz maximal 15 Wörter
+- Charmant, warmherzig, mit Augenzwinkern
+- Beziehe dich auf die Präferenzen (Küche, Ernährung) wenn passend
+- Nutze passende Emojis (1 pro Satz)
+- Keine Wiederholungen
+- Deutsch
+
+Antworte NUR mit einem JSON-Array von 7 Strings, nichts anderes:
+["Satz 1", "Satz 2", ...]"""}]
+        )
+        text = msg.content[0].text.strip()
+        import re
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            messages = json.loads(match.group(0))
+            return {"messages": messages}
+    except Exception as e:
+        logger.warning(f"Loading-Messages Generierung fehlgeschlagen: {e}")
+
+    return {"messages": []}
+
 
 
 # ─────────────────────────────────────────────

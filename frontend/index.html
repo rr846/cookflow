@@ -2514,37 +2514,39 @@ const NUTRITION_FOCUS_OPTIONS = [
   { value: 'vitamins', label: 'Vitaminreich',        emoji: '🍊', desc: 'Viel Gemüse, Obst & Kräuter' },
 ];
 
-const LOADING_MESSAGES_ANON = [
+// Fallback-Texte falls die API nicht erreichbar ist
+const LOADING_MESSAGES_FALLBACK = [
   'Einen Moment, ich stelle dir gerade was richtig Gutes zusammen…',
   'Ich kombiniere gerade deine Woche, wird besser als du denkst 😉',
   'Kurz Geduld, ich suche dir genau die richtigen Gerichte raus…',
-  'Ich hab dich schon verstanden, gib mir noch einen Augenblick…',
   'Ich tüftle gerade an deinem perfekten Wochenplan 🍝',
   'Fast fertig, ich will, dass es wirklich gut zu dir passt',
   'Das wird keine Standard-Woche, versprochen 😄',
 ];
 
-function getLoadingMessages() {
-  const name = localStorage.getItem('cookflow_name');
-  const firstName = name ? name.split(' ')[0] : '';
-  if (firstName) {
-    return [
-      `Einen Moment, ${firstName}, ich stelle dir gerade was richtig Passendes zusammen…`,
-      `${firstName}, ich glaube ich hab da genau deinen Geschmack getroffen, gleich siehst du's 😉`,
-      `Kurz Geduld, ${firstName}, ich baue dir gerade deine perfekte Woche zusammen 🍽️`,
-      ...LOADING_MESSAGES_ANON,
-    ];
-  }
-  return LOADING_MESSAGES_ANON;
-}
+let _personalizedMessages = null;
 
-const LOADING_MESSAGES = getLoadingMessages();
+async function getLoadingMessages() {
+  // Einmal generierte Messages cachen
+  if (_personalizedMessages && _personalizedMessages.length > 0) {
+    return _personalizedMessages;
+  }
+  try {
+    const res = await fetch('/api/loading-messages');
+    const data = await res.json();
+    if (data.messages && data.messages.length > 0) {
+      _personalizedMessages = data.messages;
+      return _personalizedMessages;
+    }
+  } catch (_) {}
+  return LOADING_MESSAGES_FALLBACK;
+}
 let _loadingInterval = null;
 
 async function showLoadingOverlay() {
   const el = document.getElementById('loading-overlay');
   const txt = document.getElementById('loading-text');
-  const msgs = getLoadingMessages();
+  const msgs = await getLoadingMessages();
   txt.textContent = msgs[Math.floor(Math.random() * msgs.length)];
   el.style.display = 'flex';
 
