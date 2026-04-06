@@ -1235,6 +1235,50 @@ def api_research_status():
     }
 
 
+@app.get("/api/admin/stats")
+def api_admin_stats():
+    """Admin-Statistiken: User, Pläne, Rezepte, Kosten."""
+    conn = get_db()
+
+    # Google-Accounts (letzte 7 Tage)
+    users_total = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()["cnt"]
+    users_week = conn.execute(
+        "SELECT COUNT(*) as cnt FROM users WHERE created_at >= date('now', '-7 days')"
+    ).fetchone()["cnt"]
+
+    # Wochenpläne
+    plans_total = conn.execute("SELECT COUNT(*) as cnt FROM weekly_plans").fetchone()["cnt"]
+    plans_week = conn.execute(
+        "SELECT COUNT(*) as cnt FROM weekly_plans WHERE created_at >= date('now', '-7 days')"
+    ).fetchone()["cnt"]
+
+    # Rezepte
+    recipes_total = conn.execute("SELECT COUNT(*) as cnt FROM recipes").fetchone()["cnt"]
+
+    # Bilder
+    import glob
+    images_count = len(glob.glob(str(Path(__file__).parent / "images" / "*.jpg")))
+
+    conn.close()
+
+    # Kostenschätzung
+    # Pro Wochenplan: ~$0.07 (Rezepte) + ~$0.01 (Bildprompts) + ~$0.03 (Bilder) + ~$0.01 (Ladetexte) = ~$0.12
+    estimated_cost_per_plan = 0.12
+    estimated_total_cost = plans_total * estimated_cost_per_plan
+
+    return {
+        "users": {"total": users_total, "last_7_days": users_week},
+        "plans": {"total": plans_total, "last_7_days": plans_week},
+        "recipes": {"total": recipes_total},
+        "images": {"cached": images_count},
+        "estimated_api_costs": {
+            "per_plan_usd": estimated_cost_per_plan,
+            "total_usd": round(estimated_total_cost, 2),
+            "note": "Geschätzt: $0.07 Rezepte + $0.01 Bildprompts + $0.03 Bilder + $0.01 Ladetexte pro Plan"
+        },
+    }
+
+
 @app.get("/api/research/inspirations")
 def api_get_inspirations(cuisine: str = "", limit: int = 20):
     """Gibt relevante Inspirationen aus der DB zurück."""
